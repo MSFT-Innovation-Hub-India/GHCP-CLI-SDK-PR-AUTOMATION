@@ -7,17 +7,21 @@ This document provides visual and technical documentation of the Fleet Complianc
 ## Core Concept: SDK as Agent Brain
 
 The Fleet Compliance Agent is a **TRUE agentic implementation**:
-- The Copilot SDK decides which tools to call and in what order
+- The **GitHub Copilot SDK** (via Copilot API) is the agent brain
 - Custom tools are registered with the SDK and exposed via function calling
 - The SDK reasons about tool results and decides next steps
 - The agent loop continues until the task is complete
 
+> **Important Distinction:**
+> - **Copilot SDK** = Agent brain (LLM reasoning, tool orchestration)
+> - **Azure OpenAI** = Vector Store ONLY (RAG search, no LLM reasoning)
+
 ```mermaid
 flowchart TB
-    subgraph AgentBrain["🧠 Copilot SDK - The Agent Brain"]
-        LLM[GPT-4o<br/>via Copilot API]
+    subgraph AgentBrain["🧠 GitHub Copilot SDK - The Agent Brain"]
+        LLM[Copilot API<br/>Autonomous Reasoning]
         PROMPT[System Prompt<br/>Compliance Workflow Instructions]
-        DECIDE[/"Autonomous Decision Making<br/>Which tool? What args?"/]
+        DECIDE[/"Decides Which Tool to Call<br/>and With What Arguments"/]
     end
 
     subgraph CustomTools["🔧 11 Custom Tools"]
@@ -35,7 +39,7 @@ flowchart TB
     end
 
     subgraph External["🌐 External Services"]
-        AOAI[(Azure OpenAI<br/>Vector Store)]
+        AOAI[(Azure OpenAI<br/>Vector Store ONLY<br/>No LLM Reasoning)]
         MCP_SEC[MCP: Security Server]
         MCP_CM[MCP: Change Mgmt Server]
         GH[(GitHub)]
@@ -96,8 +100,8 @@ sequenceDiagram
 
 ```mermaid
 flowchart TB
-    subgraph SDK["🧠 Copilot SDK - Agent Brain"]
-        LLM[GPT-4o decides<br/>which tools to call]
+    subgraph SDK["🧠 GitHub Copilot SDK - Agent Brain"]
+        LLM[Copilot API decides<br/>which tools to call]
     end
 
     subgraph Tools["🔧 Custom Tool Flow"]
