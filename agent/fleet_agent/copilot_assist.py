@@ -95,6 +95,11 @@ def _draft_with_sdk_direct(prompt: str, stream: bool = True) -> CopilotDraft:
         CopilotDraft with the generated content
     """
     try:
+        # Ensure COPILOT_CLI_PATH is set before importing SDK
+        cli_path = os.getenv("COPILOT_CLI_PATH", "")
+        if cli_path:
+            os.environ["COPILOT_CLI_PATH"] = cli_path
+        
         from copilot import CopilotClient
         
         async def _run_sdk():
@@ -138,11 +143,12 @@ def _draft_with_sdk_direct(prompt: str, stream: bool = True) -> CopilotDraft:
                     # Handle complete message event (non-streaming fallback)
                     elif event_type == "assistant.message":
                         if hasattr(event, 'data') and hasattr(event.data, 'content'):
-                            # Only use this if we haven't received streaming chunks
-                            if not response_chunks:
-                                response_chunks.append(event.data.content)
+                            content = event.data.content
+                            # Always append non-empty content
+                            if content and len(content) > 0:
+                                response_chunks.append(content)
                                 if stream:
-                                    print(event.data.content, end="", flush=True)
+                                    print(f"\n[SDK] Received {len(content)} chars", flush=True)
                     
                     # Handle session completion
                     elif event_type in ("session.idle", "done", "message.done"):
