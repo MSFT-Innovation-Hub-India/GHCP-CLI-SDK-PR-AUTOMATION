@@ -99,7 +99,7 @@ ghcp-cli-sdk-sample1/
 │       ├── server.py
 │       └── requirements.txt
 │
-├── sample-repos/               # Demo target repos (contain compliance gaps)
+├── sample-repos/               # Demo target repos (hosted separately - see below)
 │   ├── contoso-catalog-api/
 │   ├── contoso-orders-api/
 │   └── contoso-payments-api/
@@ -117,7 +117,21 @@ ghcp-cli-sdk-sample1/
 
 ---
 
-## 🚀 Quick Start
+## � Sample Target Repositories
+
+The sample FastAPI microservices used as compliance targets are hosted in separate GitHub repositories:
+
+| Repository | Description | GitHub |
+|------------|-------------|--------|
+| **contoso-orders-api** | Order management service | [ssrikantan/contoso-orders-api](https://github.com/ssrikantan/contoso-orders-api) |
+| **contoso-payments-api** | Payment processing service (high-impact) | [ssrikantan/contoso-payments-api](https://github.com/ssrikantan/contoso-payments-api) |
+| **contoso-catalog-api** | Product catalog service | [ssrikantan/contoso-catalog-api](https://github.com/ssrikantan/contoso-catalog-api) |
+
+> **Note:** These repos are excluded from this repository via `.gitignore`. Clone them separately or use the `push-sample-repos.ps1` script to create your own copies.
+
+---
+
+## �🚀 Quick Start
 
 ### Prerequisites
 
