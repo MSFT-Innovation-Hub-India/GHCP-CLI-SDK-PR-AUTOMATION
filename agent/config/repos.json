@@ -1,0 +1,7 @@
+{
+    "repos":  [
+                  "https://github.com/ssrikantan/contoso-orders-api.git",
+                  "https://github.com/ssrikantan/contoso-payments-api.git",
+                  "https://github.com/ssrikantan/contoso-catalog-api.git"
+              ]
+}
