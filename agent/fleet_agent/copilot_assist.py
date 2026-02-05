@@ -9,6 +9,12 @@ The SDK enables AI-powered capabilities for:
 - Creating rollout and testing plans
 - Analyzing code for potential issues
 
+Streaming Support:
+- Responses are streamed by default (stream=True)
+- Tokens are printed in real-time as they arrive
+- Provides better UX during long generations
+- Can be disabled with stream=False for batch processing
+
 Integration Patterns:
 1. Direct SDK integration (recommended for production) - USE_COPILOT_SDK=true
 2. CLI subprocess integration (simpler, for demos) - USE_COPILOT_CLI=true
@@ -71,15 +77,22 @@ Please provide a professional PR description with:
     return full_prompt
 
 
-def _draft_with_sdk_direct(prompt: str) -> CopilotDraft:
+def _draft_with_sdk_direct(prompt: str, stream: bool = True) -> CopilotDraft:
     """
-    Draft using direct SDK integration.
+    Draft using direct SDK integration with streaming support.
     
     This is the recommended approach for production use.
     Requires the GitHub Copilot SDK to be installed: pip install github-copilot-sdk
     
     The SDK communicates with the Copilot CLI in server mode via JSON-RPC.
     Authentication is handled via GitHub CLI (gh auth login) or environment variables.
+    
+    Args:
+        prompt: The prompt to send to Copilot
+        stream: If True, prints tokens as they arrive (default: True)
+    
+    Returns:
+        CopilotDraft with the generated content
     """
     try:
         from copilot import CopilotClient
@@ -98,32 +111,78 @@ def _draft_with_sdk_direct(prompt: str) -> CopilotDraft:
                     }
                 })
                 
-                # Collect response using events
-                response_text = ""
+                # Collect response using events - with streaming support
+                response_chunks: list[str] = []
                 done = asyncio.Event()
                 
                 def on_event(event):
-                    nonlocal response_text
-                    if event.type.value == "assistant.message":
-                        response_text = event.data.content
-                    elif event.type.value == "session.idle":
+                    nonlocal response_chunks
+                    event_type = event.type.value if hasattr(event.type, 'value') else str(event.type)
+                    
+                    # Handle streaming delta events (tokens as they arrive)
+                    if event_type in ("assistant.message.delta", "content.delta", "message.delta"):
+                        delta_content = ""
+                        if hasattr(event, 'data'):
+                            if hasattr(event.data, 'delta'):
+                                delta_content = event.data.delta
+                            elif hasattr(event.data, 'content'):
+                                delta_content = event.data.content
+                            elif isinstance(event.data, str):
+                                delta_content = event.data
+                        
+                        if delta_content:
+                            response_chunks.append(delta_content)
+                            if stream:
+                                print(delta_content, end="", flush=True)
+                    
+                    # Handle complete message event (non-streaming fallback)
+                    elif event_type == "assistant.message":
+                        if hasattr(event, 'data') and hasattr(event.data, 'content'):
+                            # Only use this if we haven't received streaming chunks
+                            if not response_chunks:
+                                response_chunks.append(event.data.content)
+                                if stream:
+                                    print(event.data.content, end="", flush=True)
+                    
+                    # Handle session completion
+                    elif event_type in ("session.idle", "done", "message.done"):
+                        if stream:
+                            print()  # Newline after streaming
+                        done.set()
+                    
+                    # Handle errors
+                    elif event_type in ("error", "session.error"):
+                        error_msg = str(event.data) if hasattr(event, 'data') else "Unknown error"
+                        print(f"\nCopilot SDK error: {error_msg}")
                         done.set()
                 
                 session.on(on_event)
+                
+                if stream:
+                    print("Streaming response from Copilot SDK...")
+                    print("-" * 50)
+                
                 await session.send({"prompt": prompt})
                 
                 # Wait for completion with timeout
                 try:
-                    await asyncio.wait_for(done.wait(), timeout=60.0)
+                    await asyncio.wait_for(done.wait(), timeout=90.0)
                 except asyncio.TimeoutError:
-                    print("Copilot SDK timeout")
-                    return None
+                    print("\nCopilot SDK timeout (90s)")
+                    if response_chunks:
+                        print("Returning partial response...")
                 
                 await session.destroy()
                 
-                if response_text:
+                # Combine all chunks into final response
+                full_response = "".join(response_chunks)
+                
+                if full_response:
+                    if stream:
+                        print("-" * 50)
+                        print(f"Received {len(full_response)} characters")
                     return CopilotDraft(
-                        text=response_text,
+                        text=full_response,
                         model_used=model,
                         tokens_used=None,
                     )
@@ -263,6 +322,7 @@ def draft_pr_body(
     changes: Iterable[str],
     use_copilot: bool = False,
     context: Optional[dict] = None,
+    stream: bool = True,
 ) -> CopilotDraft:
     """
     Draft the PR body using available methods.
@@ -278,6 +338,7 @@ def draft_pr_body(
         changes: List of files/changes made
         use_copilot: Whether to attempt Copilot integration (legacy param)
         context: Optional additional context dict
+        stream: If True, prints tokens as they arrive in real-time (default: True)
     
     Returns:
         CopilotDraft with the generated PR body
@@ -298,10 +359,10 @@ def draft_pr_body(
     # Build the full prompt
     full_prompt = _build_prompt(prompt, evidence, changes_list, context)
     
-    # Try direct SDK first if enabled
+    # Try direct SDK first if enabled (with streaming)
     if use_sdk:
         print("Using GitHub Copilot SDK for PR description...")
-        result = _draft_with_sdk_direct(full_prompt)
+        result = _draft_with_sdk_direct(full_prompt, stream=stream)
         if result:
             return result
         print("SDK failed, trying CLI fallback...")
@@ -323,6 +384,7 @@ def suggest_code_fix(
     issue_description: str,
     code_snippet: str,
     use_copilot: bool = False,
+    stream: bool = True,
 ) -> Optional[str]:
     """
     Suggest a code fix using Copilot.
@@ -335,6 +397,7 @@ def suggest_code_fix(
         issue_description: Description of the issue to fix
         code_snippet: The code that needs fixing
         use_copilot: Whether to use Copilot for suggestions
+        stream: If True, prints tokens as they arrive in real-time (default: True)
     
     Returns:
         Suggested fix as string, or None if unavailable
@@ -355,12 +418,12 @@ Current code:
 Provide the corrected code only, no explanation.
 """
     
-    # Try SDK
-    result = _draft_with_sdk_direct(prompt)
+    # Try SDK with streaming
+    result = _draft_with_sdk_direct(prompt, stream=stream)
     if result:
         return result.text
     
-    # Try CLI
+    # Try CLI (no streaming support)
     result = _draft_with_cli(prompt)
     if result:
         return result.text
@@ -372,6 +435,7 @@ def generate_test_suggestions(
     file_path: str,
     code_content: str,
     use_copilot: bool = False,
+    stream: bool = True,
 ) -> Optional[str]:
     """
     Generate test suggestions for code using Copilot.
@@ -380,6 +444,7 @@ def generate_test_suggestions(
         file_path: Path to the file to generate tests for
         code_content: The code content
         use_copilot: Whether to use Copilot
+        stream: If True, prints tokens as they arrive in real-time (default: True)
     
     Returns:
         Suggested test code, or None if unavailable
@@ -403,10 +468,12 @@ Generate comprehensive tests covering:
 Use pytest fixtures and assertions. Output only the test code.
 """
     
-    result = _draft_with_sdk_direct(prompt)
+    # Try SDK with streaming
+    result = _draft_with_sdk_direct(prompt, stream=stream)
     if result:
         return result.text
     
+    # Try CLI (no streaming support)
     result = _draft_with_cli(prompt)
     if result:
         return result.text
