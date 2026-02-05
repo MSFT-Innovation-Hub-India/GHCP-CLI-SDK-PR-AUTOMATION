@@ -80,16 +80,38 @@ def search(query: str, k: int = 4) -> list[Hit]:
     )
     
     hits: list[Hit] = []
+    seen_files: set[str] = set()
     
-    # Extract file search results from the response
+    # Extract results from the response outputs
     for output in response.output:
-        if output.type == "file_search_call":
-            for result in output.results or []:
-                hits.append(Hit(
-                    doc_id=result.filename or result.file_id,
-                    score=result.score if hasattr(result, 'score') else 1.0,
-                    excerpt=_extract_excerpt(result.text) if hasattr(result, 'text') else ""
-                ))
+        # Check file_search_call results first (direct search results)
+        if output.type == "file_search_call" and output.results:
+            for result in output.results:
+                file_id = getattr(result, 'filename', None) or getattr(result, 'file_id', 'unknown')
+                if file_id not in seen_files:
+                    seen_files.add(file_id)
+                    hits.append(Hit(
+                        doc_id=file_id,
+                        score=getattr(result, 'score', 1.0),
+                        excerpt=_extract_excerpt(getattr(result, 'text', ''))
+                    ))
+        
+        # Also check message outputs for file citations (Azure OpenAI format)
+        elif output.type == "message" and hasattr(output, 'content'):
+            for content_block in output.content:
+                if hasattr(content_block, 'annotations'):
+                    for annotation in content_block.annotations:
+                        if hasattr(annotation, 'filename') and annotation.filename:
+                            file_id = annotation.filename
+                            if file_id not in seen_files:
+                                seen_files.add(file_id)
+                                # Extract relevant excerpt from the content text
+                                text = getattr(content_block, 'text', '')
+                                hits.append(Hit(
+                                    doc_id=file_id,
+                                    score=1.0,  # Citations don't have scores
+                                    excerpt=_extract_excerpt(text)
+                                ))
     
     return hits[:k]
 
