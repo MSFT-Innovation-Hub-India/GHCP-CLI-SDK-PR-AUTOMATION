@@ -5,13 +5,17 @@ HTTP clients for communicating with MCP servers in the Fleet Compliance Agent.
 
 This module provides simple HTTP wrappers for the two MCP servers:
 
-1. **Change Management Server** (port 4101)
+1. **Change Management Server** (default port 4101)
    - Evaluates required approvals based on CM-7 policy
    - Determines risk level and SLA for changes
 
-2. **Security Scan Server** (port 4102)
+2. **Security Scan Server** (default port 4102)
    - Scans dependencies for CVE vulnerabilities
    - Implements SEC-2.4 policy for vulnerability response
+
+Environment Variables:
+    CHANGE_MGMT_URL: Base URL for Change Management MCP (default: http://localhost:4101)
+    SECURITY_URL: Base URL for Security MCP (default: http://localhost:4102)
 
 Usage:
     from fleet_agent.mcp_clients import approval, security_scan
@@ -21,7 +25,7 @@ Usage:
     print(result["required_approvals"])  # ["SRE-Prod"]
     
     # Scan dependencies for vulnerabilities
-    result = security_scan("requests==2.25.0\nflask==2.3.0")
+    result = security_scan("requests==2.25.0\\nflask==2.3.0")
     print(result["findings"])  # List of CVEs
 
 Note:
@@ -30,11 +34,16 @@ Note:
 """
 
 from __future__ import annotations
+import os
 import requests
 
-# MCP server endpoints (localhost for dev, configurable for production)
-CHANGE_MGMT_URL = "http://localhost:4101/approval"
-SECURITY_URL = "http://localhost:4102/scan"
+# MCP server endpoints - read base URL from environment, append endpoint path
+# Env vars contain base URL (e.g., http://localhost:4101), we append the path
+_change_mgmt_base = os.getenv("CHANGE_MGMT_URL", "http://localhost:4101").rstrip("/")
+_security_base = os.getenv("SECURITY_URL", "http://localhost:4102").rstrip("/")
+
+CHANGE_MGMT_URL = f"{_change_mgmt_base}/approval"
+SECURITY_URL = f"{_security_base}/scan"
 
 
 def approval(service: str, touched_paths: list[str]) -> dict:
