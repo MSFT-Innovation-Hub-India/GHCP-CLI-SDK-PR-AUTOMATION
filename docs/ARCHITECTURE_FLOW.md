@@ -57,9 +57,6 @@ flowchart TB
     T4 --> MCP_SEC
     T7 --> MCP_CM
     T2 & T9 & T10 & T11 --> GH
-
-    style AgentBrain fill:#9944ff,color:white
-    style LLM fill:#6633cc,color:white
 ```
 
 ---
