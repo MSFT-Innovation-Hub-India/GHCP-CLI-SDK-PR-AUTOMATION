@@ -82,10 +82,9 @@ function StatusIndicator({ ok, label }: { ok: boolean; label: string }) {
 // Checklist component for a single repo
 function RepoChecklist({
   checklist,
-  repoName,
 }: {
   checklist: Record<string, ChecklistItem>
-  repoName: string
+  repoName?: string
 }) {
   return (
     <div className="space-y-1">
@@ -111,73 +110,6 @@ function RepoChecklist({
           </span>
         </div>
       ))}
-    </div>
-  )
-}
-
-// Repository card component
-function RepoCard({
-  repo,
-  checklist,
-  isActive,
-}: {
-  repo: Repo
-  checklist: Record<string, ChecklistItem>
-  isActive: boolean
-}) {
-  const completedSteps = Object.values(checklist).filter(
-    (item) => item.status === 'complete'
-  ).length
-  const totalSteps = Object.keys(checklist).length
-  const progress = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0
-
-  return (
-    <div
-      className={`bg-github-800 rounded-lg p-4 border ${
-        isActive ? 'border-copilot-500 glow-active' : 'border-gray-700'
-      } transition-all duration-300`}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <GitBranch className="w-5 h-5 text-copilot-500" />
-          <span className="font-medium text-white">{repo.name}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          {repo.status === 'complete' ? (
-            <CheckCircle2 className="w-5 h-5 text-green-500" />
-          ) : repo.status === 'running' ? (
-            <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
-          ) : repo.status === 'error' ? (
-            <AlertCircle className="w-5 h-5 text-red-500" />
-          ) : (
-            <Circle className="w-5 h-5 text-gray-600" />
-          )}
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div className="w-full bg-gray-700 rounded-full h-2 mb-3">
-        <div
-          className="bg-copilot-500 h-2 rounded-full transition-all duration-500"
-          style={{ width: `${progress}%` }}
-        />
-      </div>
-
-      {/* Checklist */}
-      <RepoChecklist checklist={checklist} repoName={repo.name} />
-
-      {/* PR Link */}
-      {repo.prUrl && (
-        <a
-          href={repo.prUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-3 flex items-center gap-2 text-sm text-copilot-400 hover:text-copilot-300"
-        >
-          <ExternalLink className="w-4 h-4" />
-          View Pull Request
-        </a>
-      )}
     </div>
   )
 }
@@ -228,6 +160,7 @@ function ToolCallDisplay({ toolCall }: { toolCall: ToolCall }) {
 export default function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null)
   const [repos, setRepos] = useState<Repo[]>([])
+  const [selectedRepo, setSelectedRepo] = useState<string>('')
   const [isRunning, setIsRunning] = useState(false)
   const [agentMessages, setAgentMessages] = useState<string[]>([])
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([])
@@ -237,6 +170,8 @@ export default function App() {
     Record<string, Record<string, ChecklistItem>>
   >({})
   const [prsCreated, setPrsCreated] = useState<string[]>([])
+  const [isInitializing, setIsInitializing] = useState(true)
+  const [initStatus, setInitStatus] = useState('Connecting to backend...')
 
   const wsRef = useRef<WebSocket | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
@@ -267,21 +202,46 @@ export default function App() {
 
   // Fetch initial data
   useEffect(() => {
+    let statusLoaded = false
+    let reposLoaded = false
+    
+    const checkInitComplete = () => {
+      if (statusLoaded && reposLoaded) {
+        setInitStatus('Ready!')
+        setTimeout(() => setIsInitializing(false), 500)
+      }
+    }
+    
+    setInitStatus('Checking system status...')
     fetch('/api/status')
       .then((res) => res.json())
-      .then(setStatus)
-      .catch(console.error)
+      .then((data) => {
+        setStatus(data)
+        statusLoaded = true
+        setInitStatus('Loading repositories...')
+        checkInitComplete()
+      })
+      .catch((err) => {
+        console.error(err)
+        setInitStatus('Failed to connect to backend. Is the server running?')
+      })
 
     fetch('/api/repos')
       .then((res) => res.json())
       .then((data) => {
         setRepos(data)
+        // Select first repo by default
+        if (data.length > 0) {
+          setSelectedRepo(data[0].name)
+        }
         // Initialize checklists for each repo
         const checklists: Record<string, Record<string, ChecklistItem>> = {}
         data.forEach((repo: Repo) => {
           checklists[repo.name] = getDefaultChecklist()
         })
         setRepoChecklists(checklists)
+        reposLoaded = true
+        checkInitComplete()
       })
       .catch(console.error)
   }, [])
@@ -321,6 +281,7 @@ export default function App() {
         break
 
       case 'agent_complete':
+        console.log('[UI] Agent complete, prs_created:', data.data.prs_created)
         setIsRunning(false)
         setPrsCreated(data.data.prs_created as string[])
         setLogs((prev) => [
@@ -402,6 +363,16 @@ export default function App() {
             r.name === data.data.repo ? { ...r, status: 'complete' } : r
           )
         )
+        break
+
+      case 'pr_created':
+        console.log('[UI] PR created:', data.data.pr_url)
+        {
+          const prUrl = data.data.pr_url as string
+          if (prUrl) {
+            setPrsCreated((prev) => prev.includes(prUrl) ? prev : [...prev, prUrl])
+          }
+        }
         break
 
       case 'agent_message':
@@ -507,8 +478,7 @@ export default function App() {
   const startAgent = () => {
     console.log('[UI] startAgent called')
     console.log('[UI] WebSocket readyState:', wsRef.current?.readyState, 'OPEN is', WebSocket.OPEN)
-    console.log('[UI] repos:', repos)
-    console.log('[UI] repos.length:', repos.length)
+    console.log('[UI] selectedRepo:', selectedRepo)
     console.log('[UI] isRunning:', isRunning)
     console.log('[UI] allSystemsReady:', allSystemsReady)
     
@@ -523,32 +493,39 @@ export default function App() {
       return
     }
     
-    if (repos.length === 0) {
-      console.error('[UI] No repos!')
-      alert('No repositories loaded.')
+    if (!selectedRepo) {
+      console.error('[UI] No repo selected!')
+      alert('Please select a repository.')
       return
     }
     
-    console.log('[UI] All checks passed, sending start command')
+    // Find the selected repo
+    const repo = repos.find((r) => r.name === selectedRepo)
+    if (!repo) {
+      console.error('[UI] Selected repo not found!')
+      alert('Selected repository not found.')
+      return
+    }
+    
+    console.log('[UI] All checks passed, sending start command for:', repo.name)
     
     // Reset state
     setToolCalls([])
     setAgentMessages([])
     setLogs([])
     setPrsCreated([])
-    setRepos((prev) => prev.map((r) => ({ ...r, status: 'pending', prUrl: undefined })))
+    setActiveRepo(selectedRepo)
     
-    // Reset all checklists
-    const checklists: Record<string, Record<string, ChecklistItem>> = {}
-    repos.forEach((repo) => {
-      checklists[repo.name] = getDefaultChecklist()
-    })
-    setRepoChecklists(checklists)
+    // Reset checklist for selected repo only
+    setRepoChecklists((prev) => ({
+      ...prev,
+      [selectedRepo]: getDefaultChecklist(),
+    }))
 
-    // Send start command
+    // Send start command with only the selected repo
     const payload = {
       action: 'start',
-      repos: repos.map((r) => r.url),
+      repos: [repo.url],
     }
     console.log('[UI] Sending payload:', JSON.stringify(payload))
     
@@ -577,6 +554,17 @@ export default function App() {
 
   return (
     <div className="h-screen bg-github-900 text-gray-200 flex flex-col overflow-hidden">
+      {/* Initialization Overlay */}
+      {isInitializing && (
+        <div className="fixed inset-0 bg-github-900/95 z-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-copilot-600 border-t-transparent mx-auto mb-4"></div>
+            <h2 className="text-xl font-bold text-white mb-2">Initializing Fleet Compliance Agent</h2>
+            <p className="text-gray-400">{initStatus}</p>
+          </div>
+        </div>
+      )}
+      
       {/* Header */}
       <header className="bg-github-800 border-b border-gray-700 px-6 py-4 flex-shrink-0">
         <div className="flex items-center justify-between">
@@ -634,7 +622,7 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 p-6 overflow-hidden">
         <div className="grid grid-cols-12 gap-6 h-full">
-          {/* Left Panel - Control & Repositories */}
+          {/* Left Panel - Control, Checklist & Tool Calls */}
           <div className="col-span-3 flex flex-col gap-4 overflow-hidden">
             {/* Control Panel */}
             <div className="bg-github-800 rounded-lg p-4 border border-gray-700">
@@ -643,11 +631,28 @@ export default function App() {
                 Fleet Audit
               </h2>
 
+              {/* Repository Dropdown */}
+              <div className="mb-4">
+                <label className="block text-sm text-gray-400 mb-2">Select Repository</label>
+                <select
+                  value={selectedRepo}
+                  onChange={(e) => setSelectedRepo(e.target.value)}
+                  disabled={isRunning}
+                  className="w-full bg-github-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-copilot-500 disabled:opacity-50"
+                >
+                  {repos.map((repo) => (
+                    <option key={repo.name} value={repo.name}>
+                      {repo.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <button
                 onClick={startAgent}
-                disabled={!allSystemsReady || isRunning}
+                disabled={!allSystemsReady || isRunning || !selectedRepo}
                 className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all ${
-                  allSystemsReady && !isRunning
+                  allSystemsReady && !isRunning && selectedRepo
                     ? 'bg-copilot-600 hover:bg-copilot-700 text-white'
                     : 'bg-gray-700 text-gray-500 cursor-not-allowed'
                 }`}
@@ -686,24 +691,47 @@ export default function App() {
               )}
             </div>
 
-            {/* Repositories */}
-            <div className="flex-1 min-h-0 overflow-auto space-y-3">
-              <h3 className="text-sm font-medium text-gray-400 px-1">
-                Fleet Repositories ({repos.length})
-              </h3>
-              {repos.map((repo) => (
-                <RepoCard
-                  key={repo.name}
-                  repo={repo}
-                  checklist={repoChecklists[repo.name] || getDefaultChecklist()}
-                  isActive={activeRepo === repo.name}
+            {/* Checklist for Selected Repo */}
+            {selectedRepo && (
+              <div className="bg-github-800 rounded-lg p-4 border border-gray-700">
+                <div className="flex items-center gap-2 mb-3">
+                  <GitBranch className="w-5 h-5 text-copilot-500" />
+                  <span className="font-medium text-white">{selectedRepo}</span>
+                </div>
+                <RepoChecklist
+                  checklist={repoChecklists[selectedRepo] || getDefaultChecklist()}
+                  repoName={selectedRepo}
                 />
-              ))}
+              </div>
+            )}
+
+            {/* Tool Calls - Moved here */}
+            <div className="flex-1 min-h-0 bg-github-800 rounded-lg border border-gray-700 flex flex-col">
+              <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <Wrench className="w-5 h-5 text-copilot-500" />
+                  <h2 className="font-semibold text-white">Tool Calls</h2>
+                </div>
+                <span className="text-xs text-gray-500">
+                  {toolCalls.length} calls
+                </span>
+              </div>
+              <div className="flex-1 min-h-0 overflow-auto p-3">
+                {toolCalls.length === 0 ? (
+                  <p className="text-gray-500 text-sm">
+                    Tool calls will appear here...
+                  </p>
+                ) : (
+                  [...toolCalls]
+                    .reverse()
+                    .map((tc, i) => <ToolCallDisplay key={i} toolCall={tc} />)
+                )}
+              </div>
             </div>
 
             {/* Results */}
             {prsCreated.length > 0 && (
-              <div className="bg-green-900/30 border border-green-700 rounded-lg p-4">
+              <div className="bg-green-900/30 border border-green-700 rounded-lg p-4 flex-shrink-0">
                 <h3 className="text-sm font-medium text-green-400 mb-2">
                   Pull Requests Created
                 </h3>
@@ -723,9 +751,9 @@ export default function App() {
             )}
           </div>
 
-          {/* Middle Panel - Agent Reasoning & Tool Calls */}
-          <div className="col-span-5 flex flex-col gap-4 overflow-hidden">
-            {/* Agent Reasoning */}
+          {/* Middle Panel - Agent Reasoning */}
+          <div className="col-span-5 flex flex-col overflow-hidden">
+            {/* Agent Reasoning - Now takes full height */}
             <div className="flex-1 min-h-0 bg-github-800 rounded-lg border border-gray-700 flex flex-col">
               <div className="px-4 py-3 border-b border-gray-700 flex items-center gap-2">
                 <Brain className="w-5 h-5 text-copilot-500" />
@@ -798,30 +826,6 @@ export default function App() {
                   ))
                 )}
                 <div ref={messagesEndRef} />
-              </div>
-            </div>
-
-            {/* Tool Calls */}
-            <div className="h-64 min-h-0 bg-github-800 rounded-lg border border-gray-700 flex flex-col flex-shrink-0">
-              <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Wrench className="w-5 h-5 text-copilot-500" />
-                  <h2 className="font-semibold text-white">Tool Calls</h2>
-                </div>
-                <span className="text-xs text-gray-500">
-                  {toolCalls.length} calls
-                </span>
-              </div>
-              <div className="flex-1 min-h-0 overflow-auto p-3">
-                {toolCalls.length === 0 ? (
-                  <p className="text-gray-500 text-sm">
-                    Tool calls will appear here...
-                  </p>
-                ) : (
-                  [...toolCalls]
-                    .reverse()
-                    .map((tc, i) => <ToolCallDisplay key={i} toolCall={tc} />)
-                )}
               </div>
             </div>
           </div>

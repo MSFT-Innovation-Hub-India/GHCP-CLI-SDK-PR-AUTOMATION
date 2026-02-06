@@ -61,6 +61,7 @@ class EventType(str, Enum):
     REPO_START = "repo_start"
     REPO_PROGRESS = "repo_progress"
     REPO_COMPLETE = "repo_complete"
+    PR_CREATED = "pr_created"
     
     # Console logs
     CONSOLE_LOG = "console_log"
@@ -452,8 +453,43 @@ Process all repositories completely."""
                     if log_msg:
                         event_queue.put(("log", (log_msg, "success")))
                     
-                    # If PR created, mark repo complete
+                    # If PR created, mark repo complete and capture PR URL
                     if tool_name == "create_pull_request":
+                        # Try to extract PR URL from tool result
+                        tool_content = getattr(event.data, 'content', None) or getattr(event.data, 'result', None)
+                        # Also try tool_result and text_result
+                        if not tool_content:
+                            tool_content = getattr(event.data, 'tool_result', None) or getattr(event.data, 'text_result', None)
+                        # Debug: print all attributes
+                        print(f"[SDK] create_pull_request result attributes: {dir(event.data)}", flush=True)
+                        print(f"[SDK] create_pull_request tool_content: {tool_content}", flush=True)
+                        
+                        pr_url = None
+                        if tool_content:
+                            try:
+                                import json as json_mod
+                                if isinstance(tool_content, str):
+                                    data = json_mod.loads(tool_content)
+                                else:
+                                    data = tool_content
+                                if isinstance(data, dict):
+                                    pr_url = data.get("pr_url") or data.get("url") or data.get("html_url")
+                                    print(f"[SDK] Extracted PR URL from JSON: {pr_url}", flush=True)
+                            except Exception as e:
+                                print(f"[SDK] JSON parse failed: {e}, trying regex", flush=True)
+                                # Try regex extraction as fallback
+                                pr_match = re.search(r'https://github\.com/[^/]+/[^/]+/pull/\d+', str(tool_content))
+                                if pr_match:
+                                    pr_url = pr_match.group(0)
+                                    print(f"[SDK] Extracted PR URL from regex: {pr_url}", flush=True)
+                        
+                        if pr_url and pr_url not in prs_created:
+                            prs_created.append(pr_url)
+                            event_queue.put(("pr_created", {"repo": self.current_repo, "pr_url": pr_url}))
+                            event_queue.put(("log", (f"🔗 PR created: {pr_url}", "success")))
+                        else:
+                            print(f"[SDK] No PR URL found in tool result", flush=True)
+                        
                         event_queue.put(("repo_complete", {"repo": self.current_repo}))
                 
                 elif event_type == "session.idle":
@@ -486,6 +522,8 @@ Process all repositories completely."""
                                 await self.emit(WSEvent(type=EventType.REPO_START, data=data))
                             elif event_type == "repo_complete":
                                 await self.emit(WSEvent(type=EventType.REPO_COMPLETE, data=data))
+                            elif event_type == "pr_created":
+                                await self.emit(WSEvent(type=EventType.PR_CREATED, data=data))
                             elif event_type == "checklist":
                                 await self.update_checklist(data[0], data[1], data[2] if len(data) > 2 else None)
                             elif event_type == "log":
