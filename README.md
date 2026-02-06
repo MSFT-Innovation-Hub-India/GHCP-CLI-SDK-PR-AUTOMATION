@@ -621,6 +621,43 @@ python -m fleet_agent.run
    - `needs-security-approval` for auth/secret file changes
    - Standard PRs get `ready-for-review`
 
+### Workspace Isolation
+
+Each repository is cloned into a **unique, isolated workspace directory**:
+
+```
+agent/workspaces/
+├── contoso-orders-api-Xa7kM2/      # Unique ID suffix (nanoid)
+├── contoso-payments-api-9bPqL1/
+└── contoso-catalog-api-nR3xWv/
+```
+
+**Why separate workspaces?**
+
+| Reason | Explanation |
+|--------|-------------|
+| **Isolation** | Changes to one repo don't affect others |
+| **Parallel safety** | Multiple repos can be processed without conflicts |
+| **Clean state** | Each run starts with a fresh clone (no stale state) |
+| **Debugging** | Workspaces persist after run for inspection |
+| **Idempotency** | Re-running creates new workspace, avoiding merge conflicts |
+
+**What happens in each workspace:**
+
+1. **Clone** - Shallow clone (`--depth 1`) of the repo
+2. **Analysis** - `patcher_fastapi.py` reads files to detect drift
+3. **Branch** - Feature branch created locally
+4. **Patching** - Code modifications written directly to files:
+   - `app/main.py` - Health endpoints, middleware imports
+   - `app/middleware.py` - New file for request context
+   - `app/logging_config.py` - New file for structlog setup
+   - `requirements.txt` - Dependencies added
+   - `tests/test_health.py` - New test file
+5. **Testing** - `pytest` runs inside the workspace against modified code
+6. **Git operations** - Commit, push, and PR creation happen from workspace
+
+**Cleanup:** Workspaces are in `.gitignore` and can be manually deleted after demos. They are NOT automatically cleaned up (useful for debugging failures).
+
 ---
 
 ## � Compliance Gaps in Sample Repos
