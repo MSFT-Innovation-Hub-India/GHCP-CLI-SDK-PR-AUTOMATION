@@ -182,18 +182,21 @@ CREATE TABLE audit_events (
 - Dead letter queue for failed jobs
 - Manual intervention workflow for blocked PRs
 
-### Real-World Adoption
+### Related Industry Patterns
 
-This pattern is used by companies building internal developer platforms:
+This demo aligns with established patterns in platform engineering:
 
-| Company | Implementation |
-|---------|---------------|
-| **Spotify** | Backstage plugins for automated compliance |
-| **Netflix** | Automated security remediation at scale |
-| **Uber** | Self-service infrastructure compliance |
-| **Shopify** | Automated dependency updates across thousands of repos |
+| Pattern/Tool | Description |
+|--------------|-------------|
+| **Backstage (Spotify OSS)** | Open-source developer portal with plugin ecosystem for automation |
+| **Dependabot / Renovate** | Automated dependency update PRs at scale |
+| **GitHub Advanced Security** | Automated security alerts and remediation suggestions |
+| **Policy-as-Code (OPA, Kyverno)** | Declarative policy enforcement in CI/CD |
+| **Internal Developer Platforms** | Self-service portals with guardrails (industry trend) |
 
-The approach of **"AI proposes, human approves"** is becoming the standard for enterprise automation - maintaining human oversight while scaling operations.
+The approach of **"automation proposes, human approves"** is an established GitOps pattern - maintaining human oversight while scaling operations. AI-powered agents extend this pattern by adding reasoning capabilities for complex, context-dependent decisions.
+
+> **Note:** This demo is a proof-of-concept. The specific implementation of AI agents for compliance is an emerging practice; references to industry patterns above are to related (not identical) automation approaches.
 
 ---
 
