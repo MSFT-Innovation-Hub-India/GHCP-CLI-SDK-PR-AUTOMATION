@@ -22,41 +22,53 @@ This demo showcases a Python-based compliance agent that automatically enforces 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────────────────┐
 │                         FLEET COMPLIANCE AGENT                               │
-├─────────────────────────────────────────────────────────────────────────────┤
+├──────────────────────────────────────────────────────────────────────────────┤
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │              🖥️ Visual UI Mode (React + FastAPI)                     │   │
+│  │  ┌─────────────────┐    WebSocket    ┌─────────────────┐             │    │
+│  │  │  React Frontend │◄───────────────►│ FastAPI Backend │             │    │
+│  │  │  localhost:3001 │   (streaming)   │  localhost:8000 │             │    │
+│  │  └─────────────────┘                 └────────┬────────┘             │    │
+│  └───────────────────────────────────────────────┼──────────────────────┘    │
+│                                                  │ imports                   │
+│                                                  ▼                           │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │              🧠 Agent Core (agent_loop.py)                            │   │
+│  │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │  │
+│  │  │   GitHub    │    │  Knowledge  │    │   Copilot   │                 │  │
+│  │  │   Repos     │    │    Base     │    │    SDK      │                 │  │
+│  │  │  (Target)   │    │   (RAG)     │    │ (Agent Brain)│                │  │
+│  │  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘                 │  │
+│  │         │                  │                  │                        │  │
+│  │         ▼                  ▼                  ▼                        │  │
+│  │  ┌─────────────────────────────────────────────────────────────┐       │  │
+│  │  │          11 CUSTOM TOOLS (Registered with SDK)              │       │  │
+│  │  │  rag_search → clone → detect_drift → security_scan →        │       │  │
+│  │  │  create_branch → apply_patches → get_approvals →            │       │  │
+│  │  │  run_tests → commit → push → create_pull_request            │       │  │
+│  │  └───────────────────────────┬─────────────────────────────────┘       │  │
+│  └──────────────────────────────┼─────────────────────────────────────────┘  │
+│                                 │                                            │
+│         ┌───────────────────────┼────────────────────┐                       │
+│         ▼                       ▼                    ▼                       │
+│  ┌─────────────┐          ┌─────────────┐      ┌─────────────┐               │
+│  │ Change Mgmt │          │  Security   │      │   GitHub    │               │
+│  │ MCP Server  │          │ MCP Server  │      │     CLI     │               │
+│  │ (Approvals) │          │   (Scans)   │      │   (PRs)     │               │
+│  └─────────────┘          └─────────────┘      └─────────────┘               │
+│     :4101                    :4102                 gh                        │
 │                                                                              │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                     │
-│  │   GitHub    │    │  Knowledge  │    │   Copilot   │                     │
-│  │   Repos     │    │    Base     │    │    SDK      │                     │
-│  │  (Target)   │    │   (RAG)     │    │  (AI Assist)│                     │
-│  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘                     │
-│         │                  │                   │                            │
-│         ▼                  ▼                   ▼                            │
-│  ┌─────────────────────────────────────────────────────────────┐           │
-│  │                     AGENT CORE (Python)                      │           │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        │           │
-│  │  │  Clone  │→ │ Detect  │→ │  Patch  │→ │  Test   │→ PR    │           │
-│  │  │  Repo   │  │  Drift  │  │  Code   │  │  Local  │        │           │
-│  │  └─────────┘  └─────────┘  └─────────┘  └─────────┘        │           │
-│  └───────────────────────────┬─────────────────────────────────┘           │
-│                              │                                              │
-│         ┌────────────────────┼────────────────────┐                        │
-│         ▼                    ▼                    ▼                         │
-│  ┌─────────────┐      ┌─────────────┐      ┌─────────────┐                 │
-│  │ Change Mgmt │      │  Security   │      │   GitHub    │                 │
-│  │ MCP Server  │      │ MCP Server  │      │     CLI     │                 │
-│  │ (Approvals) │      │   (Scans)   │      │   (PRs)     │                 │
-│  └─────────────┘      └─────────────┘      └─────────────┘                 │
-│     :4101                :4102                 gh                          │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Component Details
 
 | Component | Purpose |
 |-----------|---------|
+| **React UI** | Visual dashboard with real-time streaming, per-repo checklists |
+| **FastAPI Backend** | WebSocket server wrapping agent_loop.py for event streaming |
 | **Agent Core** | Orchestrates the compliance workflow |
 | **Knowledge Base** | Markdown policy documents searchable via RAG |
 | **Change Mgmt MCP** | Evaluates approval requirements per CM-7 matrix |
@@ -108,8 +120,20 @@ ghcp-cli-sdk-sample1/
 │   ├── setup.ps1               # Initial setup
 │   ├── start-mcp-servers.ps1   # Start MCP servers
 │   ├── stop-mcp-servers.ps1    # Stop MCP servers
-│   ├── run-agent.ps1           # Run the agent
+│   ├── run-agent.ps1           # Run the agent (console mode)
+│   ├── start-ui.ps1            # Run the agent (visual UI mode)
 │   └── push-sample-repos.ps1   # Push samples to GitHub
+│
+├── ui/                         # Visual UI (React + FastAPI)
+│   ├── frontend/               # React app with Vite + Tailwind
+│   │   ├── src/App.tsx         # Main UI component
+│   │   └── package.json
+│   ├── backend/                # FastAPI WebSocket server
+│   │   └── main.py             # Event streaming wrapper
+│   └── README.md               # UI-specific documentation
+│
+├── docs/                       # Architecture documentation
+│   └── ARCHITECTURE_FLOW.md    # Detailed flow diagrams
 │
 ├── DEMO_CHECKLIST.md           # Demo presentation guide
 └── README.md                   # This file
@@ -117,7 +141,23 @@ ghcp-cli-sdk-sample1/
 
 ---
 
-## � Sample Target Repositories
+## 📜 Policy ID Naming Conventions
+
+The knowledge base policy documents use IDs inspired by real compliance frameworks:
+
+| Prefix | Category | Inspired By |
+|--------|----------|-------------|
+| **CM** | Configuration Management | NIST 800-53 (CM controls) |
+| **OBS** | Observability | SRE/DevOps practices |
+| **OPS** | Operations | SRE/Platform operations |
+| **REL** | Reliability | Google SRE, AWS Well-Architected |
+| **SEC** | Security | NIST, SOC 2, CIS Controls |
+
+The numbering follows a `Category.Control` pattern (e.g., `OBS-1.1`, `SEC-2.4`) common in enterprise GRC (Governance, Risk, Compliance) tools.
+
+---
+
+## 🎯 Sample Target Repositories
 
 The sample FastAPI microservices used as compliance targets are hosted in separate GitHub repositories:
 
@@ -335,7 +375,6 @@ AZURE_OPENAI_VECTOR_STORE_ID=vs_xxxxxxxxxxxx
 
 # GitHub Copilot SDK Configuration
 USE_COPILOT_SDK=true
-COPILOT_MODEL=gpt-4o
 
 # Windows: Path to Copilot CLI (required on Windows)
 COPILOT_CLI_PATH=C:\Users\YOUR_USERNAME\AppData\Roaming\npm\copilot.cmd
@@ -458,7 +497,163 @@ This PR enforces fleet compliance policies across the service.
 
 ---
 
-## 🔧 Customization Points
+## �️ Visual UI Mode (React + FastAPI)
+
+For demos and presentations, a visual UI provides real-time streaming of agent activity.
+> **⚠️ Important: Single-User Local Application**
+>
+> This React-based web app is designed for **single-user, local execution only**. It is NOT intended to be hosted on a web server for concurrent multi-user access.
+>
+> **Prerequisites for the logged-in user:**
+> - Authenticated with GitHub CLI: `gh auth login`
+> - Authenticated with Azure: `az login`
+> - GitHub Copilot CLI installed and SDK dependencies met
+>
+> The agent uses the **local user's credentials** for GitHub operations and Azure OpenAI access.
+### Quick Start
+
+```powershell
+# Prerequisites: MCP servers running
+.\scripts\start-mcp-servers.ps1
+
+# Start both frontend and backend
+.\scripts\start-ui.ps1
+
+# Open http://localhost:3001 in browser
+```
+
+### UI Panels
+
+| Panel | Description |
+|-------|-------------|
+| **Control** | Start/stop agent, system status indicators |
+| **Fleet Repos** | Per-repo progress cards with step-by-step checklist |
+| **Agent Reasoning** | Streaming agent messages with markdown table rendering |
+| **Tool Calls** | Real-time tool execution with arguments and status |
+| **Console Logs** | Timestamped log stream with emoji indicators |
+
+### WebSocket Event Types
+
+The backend streams these events via WebSocket (`ws://localhost:8000/ws/agent`):
+
+| Event | Description |
+|-------|-------------|
+| `agent_start` | Agent execution begins |
+| `tool_call_start` | Tool invocation with name and arguments |
+| `tool_call_complete` | Tool finished with call_number for tracking |
+| `agent_message` | Agent reasoning/message (supports markdown) |
+| `checklist_update` | Per-repo step completion |
+| `repo_start` / `repo_complete` | Repository processing boundaries |
+| `console_log` | Streaming log with level (info/success/warning/error) |
+
+---
+
+## ⚙️ Implementation Details
+
+### True Agentic Architecture
+
+The agent uses the **GitHub Copilot SDK as the autonomous decision-making brain**:
+
+```python
+from copilot import CopilotClient
+from copilot.types import Tool, ToolResult
+
+# Tools are registered with the SDK
+tools = [rag_search_tool, clone_tool, detect_drift_tool, ...]
+
+# SDK creates session with custom tools (model is Copilot's backend, not specified)
+session = await client.create_session({
+    "system_message": {"content": SYSTEM_PROMPT},
+    "tools": tools,
+    "available_tools": [t.name for t in tools],  # Whitelist
+})
+
+# SDK autonomously decides which tools to call
+session.on(event_handler)  # Receive tool calls and messages
+await session.send({"prompt": user_input})
+```
+
+**Key Design Decisions:**
+- **SDK as Brain**: The Copilot SDK (not hardcoded workflow) decides tool order
+- **11 Custom Tools**: Each tool returns `ToolResult` with JSON for LLM reasoning
+- **Event-Based**: Tool execution events stream to UI via queue
+- **Whitelist Approach**: `available_tools` ensures only custom tools are used
+
+### Event Streaming Architecture
+
+The UI uses a **queue-based event emission pattern** for thread-safe streaming:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  SDK Event Callback (on_event)                                  │
+│  └─► Synchronous, called from SDK thread                        │
+│      └─► event_queue.put(("tool_start", {...}))                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Queue Processor (async task)                                   │
+│  └─► Drains queue, emits WebSocket events                       │
+│      └─► await self.emit(WSEvent(...))                          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  React Frontend                                                 │
+│  └─► useEffect WebSocket listener                               │
+│      └─► setState updates → UI re-render                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Tool Call Tracking
+
+Tool calls are tracked by `call_id` for reliable completion matching:
+
+```python
+# On tool.execution_start
+call_id = getattr(event.data, 'call_id', None)
+active_tool_calls[call_id] = tool_name
+tool_call_count += 1
+
+# On tool.execution_complete
+tool_name = active_tool_calls.pop(call_id, None)
+event_queue.put(("tool_complete", {"tool": tool_name, "call_number": tool_call_count}))
+```
+
+### Heartbeat for Long-Running Tools
+
+Long-running operations (tests, patches, scans) emit periodic elapsed time:
+
+```python
+long_running_tools = {"run_tests", "apply_compliance_patches", "security_scan"}
+
+async def heartbeat_emitter():
+    while not done_event.is_set():
+        await asyncio.sleep(5)
+        for tool_name in long_running_tools:
+            if tool_name in long_running_start_times:
+                elapsed = int(time.time() - long_running_start_times[tool_name])
+                if elapsed % 10 == 0:  # Every 10 seconds
+                    event_queue.put(("log", (f"  ⏳ [{elapsed}s elapsed]", "info")))
+```
+
+### Checklist Per-Repository
+
+Each repository has independent checklist state, captured at queue time:
+
+```python
+# Checklist update captures repo at queue time (not processing time)
+if tool_name in tool_checklist_map:
+    event_queue.put(("checklist", (
+        tool_checklist_map[tool_name],  # e.g., "clone"
+        "running",
+        self.current_repo  # Captured NOW, not later
+    )))
+```
+
+---
+
+## �🔧 Customization Points
 
 | What to Customize | Location |
 |-------------------|----------|
@@ -474,6 +669,16 @@ This PR enforces fleet compliance policies across the service.
 ## 🤖 Copilot SDK Integration
 
 The agent integrates with the official [GitHub Copilot SDK](https://github.com/github/copilot-sdk) for AI-generated PR descriptions.
+
+> **⚠️ Preview SDK Notice**
+>
+> The GitHub Copilot SDK is currently in **preview**. This demo uses version `github-copilot-sdk>=0.1.21` (see `agent/requirements.txt`).
+>
+> **SDK Dependencies:**
+> - The SDK depends on the **GitHub Copilot CLI** (`gh copilot` extension)
+> - The user must be signed in via `gh auth login` with Copilot access
+> - The SDK communicates with Copilot CLI via JSON-RPC over stdio
+> - Authentication uses the **local user's GitHub credentials** (not API keys)
 
 ### Installation
 
@@ -500,7 +705,7 @@ async def draft_with_copilot_sdk(prompt: str) -> str:
     client = CopilotClient()
     await client.start()
     
-    session = await client.create_session({'model': 'gpt-4o'})
+    session = await client.create_session()  # Uses Copilot's backend model
     
     done = asyncio.Event()
     response_text = ''
@@ -527,7 +732,6 @@ async def draft_with_copilot_sdk(prompt: str) -> str:
 | Environment Variable | Purpose | Default |
 |---------------------|---------|---------|
 | `USE_COPILOT_SDK` | Enable AI-generated PR descriptions | `false` |
-| `COPILOT_MODEL` | Model to use | `gpt-4o` |
 | `COPILOT_CLI_PATH` | Path to CLI binary (Windows) | Auto-detect |
 
 ### Windows Path Configuration

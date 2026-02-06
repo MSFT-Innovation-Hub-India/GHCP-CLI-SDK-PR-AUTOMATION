@@ -5,16 +5,27 @@
 
 ---
 
+## Demo Modes
+
+| Mode | Command | Best For |
+|------|---------|----------|
+| **Visual UI** | `.\\scripts\\start-ui.ps1` | Live demos, presentations |
+| **Console** | `.\\scripts\\run-agent.ps1` | Development, debugging |
+
+---
+
 ## Pre-Demo Setup
 
 Before the demo:
 - [ ] GitHub repos created and pushed (contoso-*-api)
-- [ ] MCP servers running (`.\scripts\start-mcp-servers.ps1`)
-- [ ] Agent environment ready (`.\scripts\setup.ps1`)
+- [ ] MCP servers running (`.\\scripts\\start-mcp-servers.ps1`)
+- [ ] Agent environment ready (`.\\scripts\\setup.ps1`)
+- [ ] For UI mode: Node.js 18+ installed
 - [ ] Browser tabs open:
   - GitHub org/user page
   - localhost:4101/docs (Change Mgmt Swagger)
   - localhost:4102/docs (Security Swagger)
+  - localhost:3001 (UI - if using visual mode)
 
 ---
 
@@ -94,18 +105,36 @@ Open browser to `http://localhost:4101/docs`:
 
 ### 5. Run the Agent (2 min)
 
+**Option A: Visual UI (Recommended for Demos)**
+
+```powershell
+.\\scripts\\start-ui.ps1
+```
+
+Open http://localhost:3001 and click **\"Run Fleet Agent\"**
+
+**UI Highlights to show:**
+- System status indicators (green checkmarks)
+- Per-repo checklist cards updating in real-time
+- Tool calls panel showing each invocation
+- Agent reasoning with markdown tables
+- Console logs with emoji indicators
+- Progress heartbeat for long-running tools (⏳ [10s elapsed])
+
+**Option B: Console Mode**
+
 In terminal:
 ```powershell
-.\scripts\run-agent.ps1
+.\\scripts\\run-agent.ps1
 ```
 
 **Narrate as it runs:**
-- "Cloning contoso-orders-api..."
-- "Detecting drift... missing healthz, missing structlog..."
-- "Querying knowledge base for policy evidence..."
-- "Applying fixes..."
-- "Running tests..."
-- "Opening PR..."
+- \"Cloning contoso-orders-api...\"
+- \"Detecting drift... missing healthz, missing structlog...\"
+- \"Querying knowledge base for policy evidence...\"
+- \"Applying fixes...\"
+- \"Running tests...\"
+- \"Opening PR...\"
 
 ---
 
