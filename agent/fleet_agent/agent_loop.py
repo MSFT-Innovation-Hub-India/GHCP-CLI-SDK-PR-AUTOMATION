@@ -45,8 +45,42 @@ ROOT = Path(__file__).resolve().parents[1]  # agent/
 WORKSPACES = ROOT / "workspaces"
 WORKSPACES.mkdir(parents=True, exist_ok=True)
 
+# File-based PR tracking (more reliable than module-level state)
+PR_LOG_FILE = ROOT / "created_prs.json"
+
 # Global state for tracking workspaces across tool calls
 _workspace_registry: dict[str, Path] = {}
+
+# Global state for tracking created PRs (accessible by UI backend)
+created_prs: list[dict] = []  # [{"repo_url": ..., "pr_url": ...}, ...]
+
+def log_created_pr(repo_url: str, pr_url: str, title: str):
+    """Log a created PR to file for the UI backend to read."""
+    import json
+    prs = []
+    if PR_LOG_FILE.exists():
+        try:
+            prs = json.loads(PR_LOG_FILE.read_text())
+        except:
+            prs = []
+    prs.append({"repo_url": repo_url, "pr_url": pr_url, "title": title})
+    PR_LOG_FILE.write_text(json.dumps(prs))
+    print(f"[PR_LOGGED] Wrote PR to {PR_LOG_FILE}: {pr_url}", flush=True)
+
+def get_created_prs() -> list[dict]:
+    """Read created PRs from file."""
+    import json
+    if PR_LOG_FILE.exists():
+        try:
+            return json.loads(PR_LOG_FILE.read_text())
+        except:
+            return []
+    return []
+
+def clear_created_prs():
+    """Clear the PR log file."""
+    if PR_LOG_FILE.exists():
+        PR_LOG_FILE.unlink()
 
 
 # =============================================================================
@@ -548,7 +582,9 @@ def create_tools() -> list[Tool]:
     # --- Create Pull Request Tool ---
     def create_pr_handler(invocation) -> ToolResult:
         """Create a pull request."""
+        print(f"[CREATE_PR_HANDLER] Called!", flush=True)
         args = _get_args(invocation)
+        print(f"[CREATE_PR_HANDLER] Args: {args}", flush=True)
         repo_url = args.get("repo_url", "")
         base = args.get("base", "main")
         head = args.get("head", "")
@@ -557,11 +593,17 @@ def create_tools() -> list[Tool]:
         labels = args.get("labels", [])
         
         ws = _workspace_registry.get(repo_url)
+        print(f"[CREATE_PR_HANDLER] Workspace for {repo_url}: {ws}", flush=True)
         if not ws:
             return ToolResult(error="Repository not cloned. Call clone_repository first.")
         
         try:
             pr_url = open_pr(ws, base, head, title, body, labels)
+            print(f"[CREATE_PR_HANDLER] open_pr returned: {pr_url}", flush=True)
+            # Track PR for UI backend to access (both in-memory and file-based)
+            created_prs.append({"repo_url": repo_url, "pr_url": pr_url, "title": title})
+            log_created_pr(repo_url, pr_url, title)  # File-based for cross-module access
+            print(f"[PR_CREATED] {pr_url}", flush=True)  # Marker for backend to capture
             return ToolResult(textResultForLlm=json.dumps({
                 "success": True,
                 "pr_url": pr_url,
@@ -569,6 +611,7 @@ def create_tools() -> list[Tool]:
                 "message": f"Created PR: {pr_url}"
             }))
         except Exception as e:
+            print(f"[CREATE_PR_HANDLER] Exception: {e}", flush=True)
             return ToolResult(error=str(e))
 
     create_pr_tool = Tool(

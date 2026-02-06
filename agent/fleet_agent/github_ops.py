@@ -31,6 +31,8 @@ def push_branch(repo: Path, branch: str) -> None:
     _run(["git", "push", "-u", "origin", branch], cwd=repo)
 
 def open_pr(repo: Path, base: str, head: str, title: str, body: str, labels: list[str]) -> str:
+    import re
+    print(f"[GITHUB_OPS] open_pr called: repo={repo}, head={head}", flush=True)
     # Try to create labels if they don't exist (ignore errors)
     for label in labels:
         try:
@@ -43,10 +45,34 @@ def open_pr(repo: Path, base: str, head: str, title: str, body: str, labels: lis
         args += ["--label", ",".join(labels)]
     
     try:
-        return _run(args, cwd=repo)
+        result = _run(args, cwd=repo)
+        print(f"[GITHUB_OPS] gh pr create returned: {result}", flush=True)
+        return result
     except RuntimeError as e:
+        error_msg = str(e)
+        print(f"[GITHUB_OPS] gh pr create error: {error_msg}", flush=True)
+        
+        # Check if PR already exists - extract URL from error message
+        if "already exists" in error_msg.lower():
+            pr_match = re.search(r'https://github\.com/[^/]+/[^/]+/pull/\d+', error_msg)
+            if pr_match:
+                pr_url = pr_match.group(0)
+                print(f"[GITHUB_OPS] PR already exists, extracted URL: {pr_url}", flush=True)
+                return pr_url
+        
         # If label error, retry without labels
-        if "not found" in str(e).lower() and "label" in str(e).lower():
+        if "not found" in error_msg.lower() and "label" in error_msg.lower():
             args = ["gh", "pr", "create", "--base", base, "--head", head, "--title", title, "--body", body]
-            return _run(args, cwd=repo)
+            try:
+                result = _run(args, cwd=repo)
+                print(f"[GITHUB_OPS] gh pr create (retry) returned: {result}", flush=True)
+                return result
+            except RuntimeError as retry_e:
+                retry_msg = str(retry_e)
+                # Also check for "already exists" on retry
+                if "already exists" in retry_msg.lower():
+                    pr_match = re.search(r'https://github\.com/[^/]+/[^/]+/pull/\d+', retry_msg)
+                    if pr_match:
+                        return pr_match.group(0)
+                raise
         raise

@@ -231,15 +231,14 @@ class AgentEventEmitter:
     
     async def run_agent(self, repos: list[str]):
         """Run the agent with event streaming."""
-        from fleet_agent.agent_loop import create_tools, SYSTEM_PROMPT, WORKSPACES, _workspace_registry
+        from fleet_agent.agent_loop import create_tools, SYSTEM_PROMPT, WORKSPACES, _workspace_registry, get_created_prs, clear_created_prs
         from fleet_agent.github_ops import gh_auth_status
         from copilot import CopilotClient
         from copilot.types import Tool, ToolResult
         import re
-        import queue
         
-        # Event queue for thread-safe communication
-        event_queue = queue.Queue()
+        # Clear any previous PR tracking (file-based)
+        clear_created_prs()
         
         # Emit start
         await self.emit(WSEvent(
@@ -297,6 +296,12 @@ Process all repositories completely."""
             # Capture running loop for thread-safe callback
             loop = asyncio.get_running_loop()
             
+            # Helper to emit WebSocket events directly from sync callback
+            # This bypasses the queue and emits immediately
+            def emit_now(coro):
+                """Schedule async emit to run immediately on event loop."""
+                asyncio.run_coroutine_threadsafe(coro, loop)
+            
             # Tool to checklist mapping
             tool_checklist_map = {
                 "rag_search": "rag_search",
@@ -326,7 +331,7 @@ Process all repositories completely."""
                 # Show "thinking" status for intermediate events
                 if event_type in ("pending_messages.modified", "session.info", "user.message"):
                     if not thinking_logged:
-                        event_queue.put(("log", ("Agent analyzing task and planning approach...", "info")))
+                        emit_now(self.log("Agent analyzing task and planning approach...", "info"))
                         thinking_logged = True
                     return
                 
@@ -335,14 +340,17 @@ Process all repositories completely."""
                         content = event.data.content
                         print(f"[SDK] Assistant message: {content[:100]}...", flush=True)
                         
-                        # Queue the emit
-                        event_queue.put(("agent_message", {"content": content[:1000]}))
+                        # Emit directly
+                        emit_now(self.emit(WSEvent(type=EventType.AGENT_MESSAGE, data={"content": content[:1000]})))
                         
-                        # Extract PR URLs
+                        # Extract PR URLs from assistant message and emit them
                         pr_urls = re.findall(r'https://github\.com/[^/]+/[^/]+/pull/\d+', content)
                         for url in pr_urls:
                             if url not in prs_created:
                                 prs_created.append(url)
+                                print(f"[SDK] Found PR URL in assistant message: {url}", flush=True)
+                                emit_now(self.emit(WSEvent(type=EventType.PR_CREATED, data={"repo": self.current_repo, "pr_url": url})))
+                                emit_now(self.log(f"🔗 PR created: {url}", "success"))
                 
                 elif event_type == "tool.execution_start":
                     tool_name = getattr(event.data, 'tool_name', 'unknown')
@@ -361,21 +369,21 @@ Process all repositories completely."""
                         if repo_name.endswith(".git"):
                             repo_name = repo_name[:-4]
                         self.current_repo = repo_name
-                        event_queue.put(("repo_start", {"repo": repo_name, "url": args["url"]}))
+                        emit_now(self.emit(WSEvent(type=EventType.REPO_START, data={"repo": repo_name, "url": args["url"]})))
                     
-                    # Queue tool call event
-                    event_queue.put(("tool_start", {
+                    # Emit tool call event directly
+                    emit_now(self.emit(WSEvent(type=EventType.TOOL_CALL_START, data={
                         "tool": tool_name,
                         "args": args,
                         "repo": self.current_repo,
                         "call_number": tool_call_count
-                    }))
+                    })))
                     
-                    # Queue checklist update (capture current_repo at queue time)
+                    # Emit checklist update
                     if tool_name in tool_checklist_map:
-                        event_queue.put(("checklist", (tool_checklist_map[tool_name], "running", self.current_repo)))
+                        emit_now(self.update_checklist(tool_checklist_map[tool_name], "running", self.current_repo))
                     
-                    # Queue descriptive log based on tool type
+                    # Emit descriptive log based on tool type
                     # For rag_search, add a counter and store query for completion
                     if tool_name == "rag_search":
                         rag_search_counter[0] += 1
@@ -397,7 +405,7 @@ Process all repositories completely."""
                         "create_pull_request": f"📝 Creating PR: {args.get('title', '')[:40]}...",
                     }
                     log_msg = tool_descriptions.get(tool_name, f"Tool: {tool_name}")
-                    event_queue.put(("log", (log_msg, "info")))
+                    emit_now(self.log(log_msg, "info"))
                     
                     # Track long-running tools for heartbeat progress
                     if tool_name in ("run_tests", "apply_compliance_patches", "security_scan"):
@@ -419,22 +427,22 @@ Process all repositories completely."""
                         )
                     print(f"[SDK] Tool complete: {tool_name} (call_id={call_id})", flush=True)
                     
-                    event_queue.put(("tool_complete", {"tool": tool_name, "repo": self.current_repo}))
+                    emit_now(self.emit(WSEvent(type=EventType.TOOL_CALL_COMPLETE, data={"tool": tool_name, "repo": self.current_repo})))
                     
                     # Remove from long-running tracking
                     long_running_tools.discard(tool_name)
                     long_running_start_times.pop(tool_name, None)
                     
-                    # Queue checklist update
+                    # Emit checklist update
                     if tool_name in tool_checklist_map:
-                        event_queue.put(("checklist", (tool_checklist_map[tool_name], "complete", self.current_repo)))
+                        emit_now(self.update_checklist(tool_checklist_map[tool_name], "complete", self.current_repo))
                     
-                    # Queue descriptive completion log
+                    # Emit descriptive completion log
                     # For rag_search, include the query it searched for
                     if tool_name == "rag_search":
                         query_info = rag_search_queries.pop(call_id, "") if call_id else ""
                         short_query = query_info[:30] + "..." if len(query_info) > 30 else query_info
-                        event_queue.put(("log", (f"✅ Found: {short_query}", "success")))
+                        emit_now(self.log(f"✅ Found: {short_query}", "success"))
                     
                     complete_descriptions = {
                         "clone_repository": "✅ Repository cloned",
@@ -451,18 +459,31 @@ Process all repositories completely."""
                     # Only log completion for tools that have a description (skips rag_search)
                     log_msg = complete_descriptions.get(tool_name)
                     if log_msg:
-                        event_queue.put(("log", (log_msg, "success")))
+                        emit_now(self.log(log_msg, "success"))
                     
                     # If PR created, mark repo complete and capture PR URL
                     if tool_name == "create_pull_request":
-                        # Try to extract PR URL from tool result
-                        tool_content = getattr(event.data, 'content', None) or getattr(event.data, 'result', None)
-                        # Also try tool_result and text_result
-                        if not tool_content:
-                            tool_content = getattr(event.data, 'tool_result', None) or getattr(event.data, 'text_result', None)
-                        # Debug: print all attributes
-                        print(f"[SDK] create_pull_request result attributes: {dir(event.data)}", flush=True)
-                        print(f"[SDK] create_pull_request tool_content: {tool_content}", flush=True)
+                        # Debug: dump ALL attributes and values
+                        print(f"[SDK] create_pull_request event.data type: {type(event.data)}", flush=True)
+                        print(f"[SDK] create_pull_request event.data attributes: {dir(event.data)}", flush=True)
+                        for attr in dir(event.data):
+                            if not attr.startswith('_'):
+                                try:
+                                    val = getattr(event.data, attr)
+                                    if not callable(val):
+                                        print(f"[SDK]   {attr} = {val}", flush=True)
+                                except:
+                                    pass
+                        
+                        # Try multiple possible attribute names
+                        tool_content = None
+                        for attr_name in ['content', 'result', 'tool_result', 'text_result', 'output', 
+                                          'textResultForLlm', 'text_result_for_llm', 'response', 'data']:
+                            val = getattr(event.data, attr_name, None)
+                            if val:
+                                tool_content = val
+                                print(f"[SDK] Found content in '{attr_name}': {val}", flush=True)
+                                break
                         
                         pr_url = None
                         if tool_content:
@@ -485,75 +506,23 @@ Process all repositories completely."""
                         
                         if pr_url and pr_url not in prs_created:
                             prs_created.append(pr_url)
-                            event_queue.put(("pr_created", {"repo": self.current_repo, "pr_url": pr_url}))
-                            event_queue.put(("log", (f"🔗 PR created: {pr_url}", "success")))
+                            emit_now(self.emit(WSEvent(type=EventType.PR_CREATED, data={"repo": self.current_repo, "pr_url": pr_url})))
+                            emit_now(self.log(f"🔗 PR created: {pr_url}", "success"))
                         else:
                             print(f"[SDK] No PR URL found in tool result", flush=True)
                         
-                        event_queue.put(("repo_complete", {"repo": self.current_repo}))
+                        emit_now(self.emit(WSEvent(type=EventType.REPO_COMPLETE, data={"repo": self.current_repo})))
                 
                 elif event_type == "session.idle":
                     print("[SDK] Session idle - done", flush=True)
-                    event_queue.put(("done", None))
+                    done_event.set()
                 
                 elif event_type in ("error", "session.error"):
                     print(f"[SDK] Error: {event.data}", flush=True)
-                    event_queue.put(("error", str(event.data)))
+                    emit_now(self.log(f"Error: {event.data}", "error"))
+                    done_event.set()
             
-            # Background task to process event queue
-            async def process_queue():
-                print("[QUEUE] Queue processor started", flush=True)
-                processed = 0
-                while True:
-                    try:
-                        # Non-blocking check
-                        while not event_queue.empty():
-                            event_type, data = event_queue.get_nowait()
-                            processed += 1
-                            print(f"[QUEUE] Processing #{processed}: {event_type}", flush=True)
-                            
-                            if event_type == "agent_message":
-                                await self.emit(WSEvent(type=EventType.AGENT_MESSAGE, data=data))
-                            elif event_type == "tool_start":
-                                await self.emit(WSEvent(type=EventType.TOOL_CALL_START, data=data))
-                            elif event_type == "tool_complete":
-                                await self.emit(WSEvent(type=EventType.TOOL_CALL_COMPLETE, data=data))
-                            elif event_type == "repo_start":
-                                await self.emit(WSEvent(type=EventType.REPO_START, data=data))
-                            elif event_type == "repo_complete":
-                                await self.emit(WSEvent(type=EventType.REPO_COMPLETE, data=data))
-                            elif event_type == "pr_created":
-                                await self.emit(WSEvent(type=EventType.PR_CREATED, data=data))
-                            elif event_type == "checklist":
-                                await self.update_checklist(data[0], data[1], data[2] if len(data) > 2 else None)
-                            elif event_type == "log":
-                                await self.log(data[0], data[1])
-                            elif event_type == "error":
-                                await self.log(f"Error: {data}", "error")
-                                done_event.set()
-                                return
-                            elif event_type == "done":
-                                print(f"[QUEUE] Done! Processed {processed} events", flush=True)
-                                done_event.set()
-                                return
-                        
-                        await asyncio.sleep(0.05)  # Small delay between checks
-                        
-                        if done_event.is_set():
-                            # Drain remaining events
-                            while not event_queue.empty():
-                                event_type, data = event_queue.get_nowait()
-                                # Process remaining...
-                            print(f"[QUEUE] Exiting after {processed} events", flush=True)
-                            return
-                    except Exception as e:
-                        print(f"[QUEUE] Error: {e}", flush=True)
-                        await asyncio.sleep(0.1)
-            
-            # Start queue processor
-            queue_task = asyncio.create_task(process_queue())
-            
-            # Heartbeat task for long-running tools
+            # Heartbeat task for long-running tools (emits directly)
             async def heartbeat_emitter():
                 """Emit periodic elapsed time updates for long-running operations."""
                 last_emit_time = {}  # tool_name -> last emit timestamp
@@ -570,7 +539,7 @@ Process all repositories completely."""
                         
                         # Only emit every 10 seconds
                         if elapsed - last >= 10:
-                            event_queue.put(("log", (f"  ⏳ [{elapsed}s elapsed]", "info")))
+                            await self.log(f"  ⏳ [{elapsed}s elapsed]", "info")
                             last_emit_time[tool_name] = elapsed
             
             heartbeat_task = asyncio.create_task(heartbeat_emitter())
@@ -578,28 +547,43 @@ Process all repositories completely."""
             session.on(on_event)
             
             await self.log("Sending prompt to Copilot SDK...")
-            await session.send({"prompt": user_input})
             await self.log("Agent is thinking... (this may take 10-30 seconds)", "info")
             
-            # Wait for completion
+            # Run session.send() as a task while heartbeat runs in parallel
+            # Events are emitted directly via emit_now() from the on_event callback
+            send_task = asyncio.create_task(session.send({"prompt": user_input}))
+            
+            # Wait for completion (done_event is set when SDK sends "done" event)
             try:
                 await asyncio.wait_for(done_event.wait(), timeout=600.0)
             except asyncio.TimeoutError:
                 await self.log("Agent timeout (10 minutes)", "warning")
             
-            # Cancel queue processor and heartbeat
-            queue_task.cancel()
-            heartbeat_task.cancel()
+            # Wait for send to complete
             try:
-                await queue_task
-            except asyncio.CancelledError:
-                pass
+                await send_task
+            except Exception as e:
+                print(f"[SDK] Send task error: {e}", flush=True)
+            
+            # Cancel heartbeat
+            heartbeat_task.cancel()
             try:
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
             
             await session.destroy()
+            
+            # Check created_prs from file (tool handler writes PRs there)
+            file_prs = get_created_prs()
+            print(f"[SDK] Checking created_prs from file: {file_prs}", flush=True)
+            for pr_info in file_prs:
+                pr_url = pr_info.get("pr_url")
+                print(f"[SDK] Found PR in file: {pr_url}", flush=True)
+                if pr_url and pr_url not in prs_created:
+                    prs_created.append(pr_url)
+                    await self.emit(WSEvent(type=EventType.PR_CREATED, data={"repo": self.current_repo, "pr_url": pr_url}))
+                    await self.log(f"🔗 PR created: {pr_url}", "success")
             
             # Emit completion
             await self.emit(WSEvent(
