@@ -20,7 +20,7 @@ React + FastAPI visual frontend for demonstrating the Fleet Compliance Agent.
 │ • Wraps existing agent_loop.py                                  │
 │ • Real-time event streaming via asyncio.run_coroutine_threadsafe│
 │ • Tool call tracking by call_id                                 │
-│ • PR URL capture (including from "already exists" errors)       │
+│ • PR URL capture from gh pr create output                       │
 │ • Heartbeat emitter for long-running tools                      │
 └─────────────────────────────────────────────────────────────────┘
                     │ imports
@@ -187,25 +187,17 @@ async def heartbeat_emitter():
 
 ### PR URL Capture
 
-PR URLs are captured from multiple sources for reliability:
+PR URLs are captured from `gh pr create` output and emitted to the UI:
 
 ```python
-# 1. From successful `gh pr create` output
-pr_url = _run(["gh", "pr", "create", ...])  # Returns PR URL
+# github_ops.py returns the PR URL
+pr_url = _run(["gh", "pr", "create", ...])  # Returns: https://github.com/.../pull/123
 
-# 2. From "already exists" error (when PR was already created)
-except RuntimeError as e:
-    if "already exists" in str(e).lower():
-        pr_match = re.search(r'https://github\.com/[^/]+/[^/]+/pull/\d+', str(e))
-        if pr_match:
-            pr_url = pr_match.group(0)  # Extract from error message
-
-# 3. From assistant messages (LLM often mentions PR URL)
-pr_urls = re.findall(r'https://github\.com/[^/]+/[^/]+/pull/\d+', content)
-
-# 4. File-based tracking (cross-module reliability)
-log_created_pr(repo_url, pr_url, title)  # Writes to agent/created_prs.json
+# Backend emits to UI via WebSocket
+emit_now(self.emit(WSEvent(type=EventType.PR_CREATED, data={"pr_url": pr_url})))
 ```
+
+The UI displays clickable PR links in the "Pull Requests Created" section.
 
 ### Per-Repository Checklist
 

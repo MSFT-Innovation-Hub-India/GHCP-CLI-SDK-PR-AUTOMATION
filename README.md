@@ -629,30 +629,22 @@ emit_now(self.emit(WSEvent(type=EventType.TOOL_CALL_COMPLETE, data={"tool": tool
 
 ### PR URL Capture
 
-PR URLs are captured from multiple sources for robustness:
+When a PR is created, the URL is captured from `gh pr create` output:
 
 ```python
-# 1. From successful `gh pr create` output
-pr_url = _run(["gh", "pr", "create", ...])  # Returns PR URL directly
+# github_ops.py - open_pr returns the PR URL
+pr_url = _run(["gh", "pr", "create", "--base", base, "--head", head, ...])
+# Returns: https://github.com/org/repo/pull/123
 
-# 2. From "already exists" error (when PR was previously created)
-except RuntimeError as e:
-    if "already exists" in str(e).lower():
-        pr_match = re.search(r'https://github\.com/[^/]+/[^/]+/pull/\d+', str(e))
-        if pr_match:
-            pr_url = pr_match.group(0)  # Extract from error message
+# agent_loop.py - PR URL is logged and tracked
+log_created_pr(repo_url, pr_url, title)  # File-based tracking
+print(f"[PR_CREATED] {pr_url}")  # Console marker
 
-# 3. From assistant messages (LLM often mentions PR URL in response)
-pr_urls = re.findall(r'https://github\.com/[^/]+/[^/]+/pull/\d+', content)
-
-# 4. File-based tracking for cross-module reliability
-log_created_pr(repo_url, pr_url, title)  # Writes to agent/created_prs.json
+# main.py - Backend emits to UI
+emit_now(self.emit(WSEvent(type=EventType.PR_CREATED, data={"pr_url": pr_url})))
 ```
 
-This ensures PR URLs are captured even when:
-- A PR already exists for the branch
-- The SDK doesn't expose tool results in completion events
-- The agent re-runs against the same repository
+The UI displays clickable PR links in the left panel after the agent completes.
 
 ### Heartbeat for Long-Running Tools
 
