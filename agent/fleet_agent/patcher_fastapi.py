@@ -1,16 +1,78 @@
+"""
+FastAPI Compliance Patcher Module
+=================================
+Detects and applies compliance patches to FastAPI microservices.
+
+This module implements the policy enforcement logic for:
+- OPS-2.1: Health and readiness endpoints (/healthz, /readyz)
+- OBS-1.1: Structured logging with structlog
+- OBS-3.2: Trace propagation via RequestContextMiddleware
+
+The patcher performs two main operations:
+
+1. **Detection** (`detect`): Analyzes a FastAPI app to identify missing
+   compliance features (health endpoints, logging, middleware).
+
+2. **Patching** (`apply`): Automatically adds missing compliance features
+   by modifying source files (main.py, requirements.txt) and creating
+   new files (middleware.py, logging_config.py, test_health.py).
+
+Usage:
+    from fleet_agent.patcher_fastapi import detect, apply
+    from pathlib import Path
+    
+    repo = Path("./contoso-orders-api")
+    
+    # Check for compliance drift
+    drift = detect(repo)
+    if drift.missing_healthz:
+        print("Missing /healthz endpoint")
+    
+    # Apply patches to fix drift
+    modified_files = apply(repo, "contoso-orders-api")
+    print(f"Modified: {modified_files}")
+"""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+
 @dataclass
 class Drift:
+    """
+    Represents compliance drift detection results for a FastAPI app.
+    
+    Attributes:
+        applicable: True if this is a FastAPI app (has app/main.py)
+        missing_healthz: True if /healthz endpoint is missing
+        missing_readyz: True if /readyz endpoint is missing
+        missing_structlog: True if structlog is not configured
+        missing_middleware: True if RequestContextMiddleware is missing
+    """
     applicable: bool
     missing_healthz: bool = False
     missing_readyz: bool = False
     missing_structlog: bool = False
     missing_middleware: bool = False
 
+
 def detect(repo: Path) -> Drift:
+    """
+    Detect compliance drift in a FastAPI repository.
+    
+    Analyzes app/main.py to check for:
+    - /healthz endpoint (OPS-2.1)
+    - /readyz endpoint (OPS-2.1)
+    - structlog configuration (OBS-1.1)
+    - RequestContextMiddleware (OBS-3.2)
+    
+    Args:
+        repo: Path to the repository root directory
+    
+    Returns:
+        Drift object indicating which compliance features are missing
+    """
     main_py = repo / "app" / "main.py"
     if not main_py.exists():
         return Drift(applicable=False)
@@ -23,7 +85,30 @@ def detect(repo: Path) -> Drift:
         missing_middleware="RequestContextMiddleware" not in txt,
     )
 
+
 def apply(repo: Path, service_name: str) -> list[str]:
+    """
+    Apply compliance patches to a FastAPI repository.
+    
+    This function modifies the repository to add missing compliance features:
+    
+    1. **requirements.txt**: Adds structlog dependency if missing
+    2. **app/middleware.py**: Creates RequestContextMiddleware for trace propagation
+    3. **app/logging_config.py**: Creates structured logging configuration
+    4. **app/main.py**: Adds middleware, logging setup, /healthz, /readyz endpoints
+    5. **tests/test_health.py**: Creates tests for health endpoints
+    
+    Args:
+        repo: Path to the repository root directory
+        service_name: Name of the service (used in logs and health responses)
+    
+    Returns:
+        List of file paths that were modified (relative to repo root)
+    
+    Note:
+        This function is idempotent - running it multiple times will not
+        duplicate patches. It checks for existing code before adding.
+    """
     touched: list[str] = []
 
     req = repo / "requirements.txt"
@@ -126,6 +211,7 @@ def apply(repo: Path, service_name: str) -> list[str]:
     return sorted(set(touched))
 
 def _middleware_py() -> str:
+    """Generate the RequestContextMiddleware source code."""
     return '''import contextvars
 import uuid
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -171,6 +257,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 '''
 
 def _logging_py(service_name: str) -> str:
+    """Generate the logging configuration source code."""
     return f'''import logging
 import structlog
 from app.middleware import get_trace_id, get_request_id
@@ -201,6 +288,7 @@ def configure_logging() -> None:
 '''
 
 def _tests_py() -> str:
+    """Generate the health endpoint test source code."""
     return '''from fastapi.testclient import TestClient
 from app.main import app
 

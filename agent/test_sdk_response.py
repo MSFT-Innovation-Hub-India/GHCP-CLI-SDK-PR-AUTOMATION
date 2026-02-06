@@ -1,4 +1,29 @@
-"""Test script for the agentic loop with custom tools."""
+"""
+Fleet Compliance Agent - Test Script
+=====================================
+Standalone test harness for running the agent without the UI.
+
+This script provides two test modes:
+1. **Single Repository**: Quick test with one repository
+2. **All Repositories**: Full test with all repos from config/repos.json
+
+Usage:
+    # Run with single repository (default)
+    python test_sdk_response.py
+    
+    # Run with all repositories
+    python test_sdk_response.py --all
+
+Prerequisites:
+    - MCP servers running (scripts/start-mcp-servers.ps1)
+    - GitHub CLI authenticated (gh auth login)
+    - Azure OpenAI vector store configured (.env file)
+
+Note:
+    This is a development/debugging tool. For production use,
+    run the agent via the UI (ui/backend/main.py).
+"""
+
 import asyncio
 import os
 from dotenv import load_dotenv
@@ -7,8 +32,15 @@ load_dotenv()
 
 from fleet_agent.agent_loop import run_agent
 
+
 async def test_single_repo():
-    """Test with a single repository."""
+    """
+    Test the agent with a single repository.
+    
+    Runs a simplified flow that searches the knowledge base,
+    clones one repo, and detects compliance drift.
+    Useful for quick validation during development.
+    """
     result = await run_agent('''Process this repository: https://github.com/ssrikantan/contoso-orders-api
 
 Start by searching the knowledge base for health endpoint policies, then clone the repository and detect compliance drift.''')
@@ -20,7 +52,17 @@ Start by searching the knowledge base for health endpoint policies, then clone t
         print(f'  - {pr}')
 
 async def test_all_repos():
-    """Test with all repositories from config."""
+    """
+    Test the agent with all repositories from config.
+    
+    Runs the full compliance enforcement workflow on all repos
+    defined in config/repos.json. This is the same workflow
+    that the UI runs, but without the WebSocket streaming.
+    
+    Output includes:
+    - Total tool calls made
+    - List of PRs created with URLs
+    """
     import json
     from pathlib import Path
     
