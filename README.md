@@ -66,6 +66,14 @@ cd ghcp-cli-sdk-sample1
 
 The agent operates on **external GitHub repositories**. Create 3 repos from the sample code:
 
+> **Note:** These sample APIs intentionally contain compliance gaps that the agent will detect and remediate:
+> - Missing `/healthz` and `/readyz` health endpoints
+> - No structured logging (uses `print()` statements)
+> - No request correlation middleware for tracing
+> - Outdated dependencies with known vulnerabilities (payments API)
+>
+> The agent will audit these repositories, detect the issues, apply fixes, and create Pull Requests.
+
 ```powershell
 # For each API in sample-repos/, create a GitHub repo and push:
 cd sample-repos\contoso-orders-api
@@ -275,136 +283,6 @@ Organizations managing hundreds of microservices face a common challenge: **enfo
 - No authentication/authorization
 - No job queuing or scheduling
 - No audit trail or compliance reporting
-
-### Production Architecture
-
-In a production scenario, this pattern scales to support **multi-tenant, enterprise-grade operations**:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                          PRODUCTION ARCHITECTURE                                         │
-├─────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                          │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                         FRONTEND LAYER                                           │   │
-│   │   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐             │   │
-│   │   │   Web Portal    │    │  CLI Tool       │    │  GitHub App     │             │   │
-│   │   │  (React/Vue)    │    │  (Developer)    │    │  (Webhook)      │             │   │
-│   │   └────────┬────────┘    └────────┬────────┘    └────────┬────────┘             │   │
-│   └────────────┼─────────────────────┼─────────────────────┼────────────────────────┘   │
-│                │                      │                     │                            │
-│                ▼                      ▼                     ▼                            │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                          API GATEWAY                                             │   │
-│   │   • OAuth/OIDC Authentication (Azure AD, GitHub)                                 │   │
-│   │   • RBAC: Who can run agents on which repos/orgs                                 │   │
-│   │   • Rate limiting, request validation                                            │   │
-│   └─────────────────────────────────────────────────────────────────────────────────┘   │
-│                                        │                                                 │
-│                                        ▼                                                 │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                        JOB ORCHESTRATION                                         │   │
-│   │   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐             │   │
-│   │   │   Job Queue     │    │   Scheduler     │    │  Job Manager    │             │   │
-│   │   │ (Redis/RabbitMQ)│    │   (Cron/Event)  │    │  (Status/Retry) │             │   │
-│   │   └────────┬────────┘    └────────┬────────┘    └────────┬────────┘             │   │
-│   └────────────┼─────────────────────┼─────────────────────┼────────────────────────┘   │
-│                │                      │                     │                            │
-│                ▼                      ▼                     ▼                            │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                      WORKER POOL (Scalable)                                      │   │
-│   │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐        │   │
-│   │   │   Worker 1   │  │   Worker 2   │  │   Worker 3   │  │   Worker N   │        │   │
-│   │   │ (Agent Core) │  │ (Agent Core) │  │ (Agent Core) │  │ (Agent Core) │        │   │
-│   │   │  + SDK       │  │  + SDK       │  │  + SDK       │  │  + SDK       │        │   │
-│   │   └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘        │   │
-│   └─────────────────────────────────────────────────────────────────────────────────┘   │
-│                │                                                                         │
-│                ▼                                                                         │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                      DATA & INTEGRATION LAYER                                    │   │
-│   │                                                                                  │   │
-│   │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │   │
-│   │   │ PostgreSQL  │  │   Redis     │  │  Vector DB  │  │   Blob      │            │   │
-│   │   │ (Jobs, PRs, │  │  (Cache,    │  │  (Policy    │  │  Storage    │            │   │
-│   │   │  Audit)     │  │   Sessions) │  │   RAG)      │  │  (Logs)     │            │   │
-│   │   └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘            │   │
-│   │                                                                                  │   │
-│   │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │   │
-│   │   │ ServiceNow  │  │   Snyk/     │  │   GitHub    │  │  Slack/     │            │   │
-│   │   │ (Change     │  │   Dependabot│  │   (Repos,   │  │  Teams      │            │   │
-│   │   │  Mgmt)      │  │   (Security)│  │   PRs)      │  │  (Notify)   │            │   │
-│   │   └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘            │   │
-│   └─────────────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                          │
-│   ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│   │                       OBSERVABILITY                                              │   │
-│   │   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐             │   │
-│   │   │  OpenTelemetry  │    │   Prometheus    │    │   Grafana       │             │   │
-│   │   │  (Distributed   │    │   (Metrics)     │    │  (Dashboards)   │             │   │
-│   │   │   Tracing)      │    │                 │    │                 │             │   │
-│   │   └─────────────────┘    └─────────────────┘    └─────────────────┘             │   │
-│   └─────────────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                          │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Production Components Explained
-
-| Component | Production Implementation | vs POC |
-|-----------|--------------------------|--------|
-| **Authentication** | OAuth/OIDC with Azure AD or GitHub | None (local user) |
-| **Authorization** | RBAC database: user → org → repos permissions | None |
-| **Job Queue** | Redis/RabbitMQ with Celery workers | Direct execution |
-| **State Management** | PostgreSQL with jobs, PRs, audit tables | JSON file |
-| **Scalability** | Kubernetes pods with auto-scaling | Single process |
-| **Observability** | OpenTelemetry traces, Prometheus metrics | Console logs |
-| **Notifications** | WebSocket hub + Slack/Teams integration | WebSocket to single client |
-| **Scheduling** | Cron jobs or GitHub webhook triggers | Manual invocation |
-| **Audit Trail** | Full event log with user, timestamp, action | None |
-
-### Key Production Considerations
-
-**1. Multi-Tenancy**
-```sql
--- Every job is scoped to an organization
-CREATE TABLE compliance_jobs (
-    id UUID PRIMARY KEY,
-    org_id UUID NOT NULL,          -- Tenant isolation
-    user_id UUID NOT NULL,         -- Who triggered it
-    repo_url TEXT NOT NULL,
-    status VARCHAR(20),
-    created_at TIMESTAMP,
-    completed_at TIMESTAMP
-);
-```
-
-**2. Credential Management**
-- GitHub App installation tokens (per-org) instead of user PAT
-- Azure Managed Identity for OpenAI access
-- HashiCorp Vault or Azure Key Vault for secrets
-
-**3. Rate Limiting & Quotas**
-- Per-org limits on concurrent jobs
-- GitHub API rate limit handling with backoff
-- Cost tracking for LLM usage
-
-**4. Compliance & Audit**
-```sql
--- Full audit trail for compliance reporting
-CREATE TABLE audit_events (
-    id UUID PRIMARY KEY,
-    job_id UUID REFERENCES compliance_jobs(id),
-    event_type VARCHAR(50),        -- 'tool_called', 'pr_created', etc.
-    payload JSONB,
-    created_at TIMESTAMP
-);
-```
-
-**5. Error Handling & Retry**
-- Transient failure retry with exponential backoff
-- Dead letter queue for failed jobs
-- Manual intervention workflow for blocked PRs
 
 ### Related Industry Patterns
 
