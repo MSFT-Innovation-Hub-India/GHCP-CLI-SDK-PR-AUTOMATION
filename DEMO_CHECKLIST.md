@@ -10,7 +10,7 @@
 | Mode | Command | Best For |
 |------|---------|----------|
 | **Visual UI** | `.\\scripts\\start-ui.ps1` | Live demos, presentations |
-| **Console** | `.\\scripts\\run-agent.ps1` | Development, debugging |
+| **Console** | `.\\scripts\\run-agent-agentic.ps1` | Development, debugging |
 
 ---
 
@@ -125,7 +125,7 @@ Open http://localhost:3001 and click **\"Run Fleet Agent\"**
 
 In terminal:
 ```powershell
-.\\scripts\\run-agent.ps1
+.\scripts\run-agent-agentic.ps1
 ```
 
 **Narrate as it runs:**
@@ -167,17 +167,22 @@ Open GitHub PRs page.
 
 ### 7. Copilot SDK Integration (30 sec)
 
-Open `agent/fleet_agent/copilot_assist.py`:
+Open `agent/fleet_agent/agent_loop.py`:
 
-**Highlight the integration point:**
+**Highlight the SDK session creation:**
 ```python
-def draft_pr_body(prompt, evidence, changes, use_copilot=False):
-    if use_copilot:
-        from github_copilot_sdk import CopilotClient
-        # AI-powered PR descriptions
+from copilot import CopilotClient
+from copilot.types import Tool, ToolResult
+
+# Create session with 11 custom tools
+session = await client.create_session({
+    "system_message": {"content": SYSTEM_PROMPT},
+    "tools": tools,
+    "available_tools": tool_names,
+})
 ```
 
-**Say:** "This is the single integration point for Copilot SDK. When enabled, it generates richer PR descriptions with AI. For reliability, the demo uses deterministic mode, but the hook is ready for SDK integration."
+**Say:** "The Copilot SDK acts as the agent's brain. It decides which tools to call based on the system prompt. The `create_pull_request` tool generates PR descriptions - no separate copilot_assist module needed."
 
 ---
 

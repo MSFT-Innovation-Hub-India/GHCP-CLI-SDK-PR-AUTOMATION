@@ -89,7 +89,7 @@ Write-Host "  Updated repos.json" -ForegroundColor Green
 Write-Host ""
 Write-Host "Done! Next steps:" -ForegroundColor Cyan
 Write-Host "  1. Start MCP servers: .\scripts\start-mcp-servers.ps1"
-Write-Host "  2. Run the agent: .\scripts\run-agent.ps1"
+Write-Host "  2. Run the agent: .\scripts\run-agent-agentic.ps1"
 Write-Host ""
 
 Set-Location $ProjectRoot
