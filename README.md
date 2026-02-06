@@ -1,4 +1,4 @@
-# Fleet Compliance Agent Demo
+﻿# Fleet Compliance Agent Demo
 
 **Demonstrating GitHub Copilot CLI/SDK Integration for Enterprise Fleet Management**
 
@@ -19,7 +19,231 @@ This demo showcases a Python-based compliance agent that automatically enforces 
 
 ---
 
-## � From POC to Production
+## ⚡ Getting Started (Windows)
+
+> **Important:** These instructions are for **Windows** machines. Commands use PowerShell syntax.
+
+### Prerequisites Checklist
+
+Before you begin, ensure you have the following:
+
+| Requirement | Purpose | Verification |
+|-------------|---------|--------------|
+| **Python 3.11+** | Agent and MCP server runtime | `python --version` |
+| **Node.js 18+** | Frontend and Copilot CLI | `node --version` |
+| **Git** | Repository operations | `git --version` |
+| **GitHub CLI** | PR creation, repo management | `gh --version` |
+| **Azure CLI** | Azure authentication (for RAG) | `az --version` |
+| **GitHub Copilot License** | Required for Copilot SDK | Check GitHub account |
+| **GitHub Copilot CLI** | SDK dependency | `npm list -g @anthropic-ai/copilot` |
+
+### Azure Requirements
+
+This project uses **Azure OpenAI's native Vector Store** (via the OpenAI-compatible API), **NOT** Azure AI Search or Azure AI Foundry indexes.
+
+| Resource | Purpose |
+|----------|---------|
+| **Azure OpenAI Service** | Hosts the model and vector store |
+| **Model Deployment** (e.g., `gpt-4o`) | Required for Responses API with `file_search` |
+| **Vector Store** | Stores policy documents for RAG search |
+
+**RBAC Requirements:** The user running this demo must have:
+- `Cognitive Services OpenAI User` role on the Azure OpenAI resource
+- Permissions to create vector stores and upload files (refer to [Azure OpenAI documentation](https://learn.microsoft.com/en-us/azure/ai-services/openai/))
+
+---
+
+### Step-by-Step Setup
+
+#### Step 0: Clone This Repository
+
+```powershell
+git clone https://github.com/YOUR_ORG/ghcp-cli-sdk-sample1.git
+cd ghcp-cli-sdk-sample1
+```
+
+#### Step 1: Create Target Repositories
+
+The agent operates on **external GitHub repositories**. Create 3 repos from the sample code:
+
+```powershell
+# For each API in sample-repos/, create a GitHub repo and push:
+cd sample-repos\contoso-orders-api
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/contoso-orders-api.git
+git push -u origin main
+cd ..\..
+
+# Repeat for contoso-payments-api and contoso-catalog-api
+```
+
+Then update `agent/config/repos.json`:
+```json
+{
+  "repos": [
+    "https://github.com/YOUR_USERNAME/contoso-orders-api.git",
+    "https://github.com/YOUR_USERNAME/contoso-payments-api.git",
+    "https://github.com/YOUR_USERNAME/contoso-catalog-api.git"
+  ]
+}
+```
+
+#### Step 2: Authenticate with Azure and GitHub
+
+```powershell
+# Azure - must be logged into the subscription with your Azure OpenAI resource
+az login
+az account set --subscription "YOUR_SUBSCRIPTION_NAME"
+
+# GitHub CLI - must have Copilot access
+gh auth login
+```
+
+#### Step 3: Configure Environment
+
+```powershell
+# Copy the example environment file
+cd agent
+copy .env.example .env
+```
+
+Edit `agent/.env` with your Azure OpenAI details:
+```env
+# Azure OpenAI Configuration
+AZURE_OPENAI_ENDPOINT=https://YOUR_RESOURCE.openai.azure.com/openai/v1/
+AZURE_OPENAI_DEPLOYMENT=gpt-4o
+AZURE_OPENAI_VECTOR_STORE_ID=   # Will be set by deploy script
+
+# Copilot CLI path (find with: where.exe copilot)
+COPILOT_CLI_PATH=C:\Users\YOUR_USERNAME\AppData\Roaming\npm\copilot.cmd
+
+# MCP Server URLs (defaults)
+CHANGE_MGMT_URL=http://localhost:4101
+SECURITY_URL=http://localhost:4102
+```
+
+#### Step 4: Create Python Virtual Environments
+
+Create a virtual environment in **each** of these folders:
+
+```powershell
+# MCP Change Management Server
+cd mcp\change_mgmt
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+deactivate
+cd ..\..
+
+# MCP Security Server
+cd mcp\security
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+deactivate
+cd ..\..
+
+# Agent (includes github-copilot-sdk)
+cd agent
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+deactivate
+cd ..
+```
+
+**Key Dependency:** The agent requires `github-copilot-sdk>=0.1.21` which is the core of this project.
+
+#### Step 5: Deploy Vector Store with Policy Documents
+
+Upload the knowledge base files to Azure OpenAI:
+
+```powershell
+# Activate agent venv (has required dependencies)
+cd agent
+.venv\Scripts\Activate.ps1
+
+# Run the deployment script
+python ..\scripts\deploy-vector-store.py
+
+# This will:
+# 1. Create a vector store named "fleet-compliance-knowledge"
+# 2. Upload all .md files from knowledge/ folder
+# 3. Update agent/.env with the AZURE_OPENAI_VECTOR_STORE_ID
+
+deactivate
+cd ..
+```
+
+#### Step 6: Install Frontend Dependencies
+
+```powershell
+cd ui\frontend
+npm install
+cd ..\..
+```
+
+---
+
+### Running the Demo
+
+Open **4 separate PowerShell terminals**:
+
+**Terminal 1 - Change Management MCP Server:**
+```powershell
+cd mcp\change_mgmt
+.venv\Scripts\Activate.ps1
+uvicorn server:app --host 0.0.0.0 --port 4101
+```
+
+**Terminal 2 - Security MCP Server:**
+```powershell
+cd mcp\security
+.venv\Scripts\Activate.ps1
+uvicorn server:app --host 0.0.0.0 --port 4102
+```
+
+**Terminal 3 - FastAPI Backend:**
+```powershell
+cd ui\backend
+..\..\agent\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+**Terminal 4 - React Frontend:**
+```powershell
+cd ui\frontend
+npm run dev
+```
+
+**Open in browser:** http://localhost:3000 (or the port shown by Vite)
+
+---
+
+### What Happens on Each Run
+
+- A **new workspace directory** is created for each repository: `agent/workspaces/contoso-orders-api-Xa7kM2/`
+- All code analysis, patching, and testing happens in this isolated workspace
+- Workspaces persist after the run for debugging (manually delete to clean up)
+- Workspaces are in `.gitignore` and not committed
+
+---
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `copilot: command not found` | Set `COPILOT_CLI_PATH` in `.env` to full path |
+| `DefaultAzureCredential failed` | Run `az login` and ensure correct subscription |
+| `Vector store not found` | Run `deploy-vector-store.py` script |
+| `Connection refused :4101/:4102` | Ensure MCP servers are running |
+| `gh: not logged in` | Run `gh auth login` |
+
+---
+
+## 🏢 From POC to Production
 
 This demo implements a pattern that is **directly applicable to enterprise production environments**. The underlying use case - automated compliance enforcement via AI agents - is increasingly common in platform engineering and DevSecOps.
 
