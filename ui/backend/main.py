@@ -92,12 +92,13 @@ def check_system_status() -> dict:
     """Check if all required services are available."""
     status = {
         "github_cli": False,
+        "github_user": None,
         "mcp_security": False,
         "mcp_change_mgmt": False,
         "vector_store": False,
     }
     
-    # Check GitHub CLI
+    # Check GitHub CLI and get username
     try:
         result = subprocess.run(
             ["gh", "auth", "status"],
@@ -106,6 +107,13 @@ def check_system_status() -> dict:
             timeout=10
         )
         status["github_cli"] = result.returncode == 0
+        
+        # Extract username from output (format: "Logged in to github.com account USERNAME")
+        if result.returncode == 0:
+            import re
+            match = re.search(r'Logged in to github\.com account ([^\s(]+)', result.stdout + result.stderr)
+            if match:
+                status["github_user"] = match.group(1)
     except:
         pass
     
@@ -121,11 +129,29 @@ def check_system_status() -> dict:
         except:
             pass
     
-    # Check Vector Store (via env vars)
-    status["vector_store"] = bool(
-        os.getenv("AZURE_OPENAI_ENDPOINT") and 
-        os.getenv("AZURE_OPENAI_VECTOR_STORE_ID")
-    )
+    # Check Vector Store - verify connectivity
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    vector_store_id = os.getenv("AZURE_OPENAI_VECTOR_STORE_ID")
+    if endpoint and vector_store_id:
+        try:
+            from openai import AzureOpenAI
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            
+            token_provider = get_bearer_token_provider(
+                DefaultAzureCredential(),
+                "https://cognitiveservices.azure.com/.default"
+            )
+            client = AzureOpenAI(
+                azure_endpoint=endpoint.replace("/openai/v1/", "").replace("/openai/v1", ""),
+                azure_ad_token_provider=token_provider,
+                api_version="2025-01-01-preview"
+            )
+            # Quick check - retrieve vector store info
+            vs = client.vector_stores.retrieve(vector_store_id)
+            status["vector_store"] = vs.status == "completed"
+        except Exception as e:
+            print(f"[STATUS] Vector store check failed: {e}")
+            status["vector_store"] = False
     
     return status
 

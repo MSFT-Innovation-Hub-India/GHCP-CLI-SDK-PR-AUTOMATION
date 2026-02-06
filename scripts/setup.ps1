@@ -158,9 +158,9 @@ Write-Host "     cd mcp\change_mgmt; .\.venv\Scripts\uvicorn server:app --port 4
 Write-Host "     cd mcp\security; .\.venv\Scripts\uvicorn server:app --port 4102"
 Write-Host ""
 Write-Host "5. Run the fleet agent:" -ForegroundColor White
-Write-Host "   .\scripts\run-agent.ps1" -ForegroundColor Gray
-Write-Host "   Or manually:"
-Write-Host "     cd agent; .\.venv\Scripts\python -m fleet_agent.run"
+Write-Host "   .\scripts\run-agent-agentic.ps1" -ForegroundColor Gray
+Write-Host "   Or via UI:"
+Write-Host "     .\scripts\start-ui.ps1"
 Write-Host ""
 
 Set-Location $ProjectRoot

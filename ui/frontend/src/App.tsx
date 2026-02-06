@@ -18,11 +18,13 @@ import {
   ExternalLink,
   RefreshCw,
   XCircle,
+  User,
 } from 'lucide-react'
 
 // Types
 interface SystemStatus {
   github_cli: boolean
+  github_user: string | null
   mcp_security: boolean
   mcp_change_mgmt: boolean
   vector_store: boolean
@@ -594,6 +596,13 @@ export default function App() {
 
           {/* System Status */}
           <div className="flex items-center gap-6">
+            {/* GitHub User */}
+            {status?.github_user && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-github-700 rounded-lg">
+                <User className="w-4 h-4 text-copilot-400" />
+                <span className="text-sm text-gray-300">{status.github_user}</span>
+              </div>
+            )}
             <div className="flex items-center gap-4 text-sm">
               <StatusIndicator
                 ok={status?.github_cli ?? false}
