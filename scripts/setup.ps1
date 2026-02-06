@@ -148,13 +148,16 @@ Write-Host "   - contoso-payments-api"
 Write-Host ""
 Write-Host "2. Update agent/config/repos.json with your repo URLs" -ForegroundColor White
 Write-Host ""
-Write-Host "3. Start MCP servers (in separate terminals):" -ForegroundColor White
+Write-Host "3. Deploy the Azure OpenAI vector store (requires Azure CLI auth):" -ForegroundColor White
+Write-Host "   .\scripts\deploy-vector-store.ps1" -ForegroundColor Gray
+Write-Host ""
+Write-Host "4. Start MCP servers (in separate terminals):" -ForegroundColor White
 Write-Host "   Terminal 1: .\scripts\start-mcp-servers.ps1" -ForegroundColor Gray
 Write-Host "   Or manually:"
 Write-Host "     cd mcp\change_mgmt; .\.venv\Scripts\uvicorn server:app --port 4101"
 Write-Host "     cd mcp\security; .\.venv\Scripts\uvicorn server:app --port 4102"
 Write-Host ""
-Write-Host "4. Run the fleet agent:" -ForegroundColor White
+Write-Host "5. Run the fleet agent:" -ForegroundColor White
 Write-Host "   .\scripts\run-agent.ps1" -ForegroundColor Gray
 Write-Host "   Or manually:"
 Write-Host "     cd agent; .\.venv\Scripts\python -m fleet_agent.run"
