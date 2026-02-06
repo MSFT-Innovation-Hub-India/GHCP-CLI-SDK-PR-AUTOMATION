@@ -516,18 +516,26 @@ For demos and presentations, a visual UI provides real-time streaming of agent a
 # Start both frontend and backend
 .\scripts\start-ui.ps1
 
-# Open http://localhost:3001 in browser
+# Open http://localhost:3000 in browser
 ```
 
-### UI Panels
+### UI Layout
 
-| Panel | Description |
-|-------|-------------|
-| **Control** | Start/stop agent, system status indicators |
-| **Fleet Repos** | Per-repo progress cards with step-by-step checklist |
-| **Agent Reasoning** | Streaming agent messages with markdown table rendering |
-| **Tool Calls** | Real-time tool execution with arguments and status |
-| **Console Logs** | Timestamped log stream with emoji indicators |
+The UI features a **three-panel layout** optimized for demos:
+
+| Panel | Location | Description |
+|-------|----------|-------------|
+| **Control + Tool Calls** | Left | Repo selector dropdown, run button, checklist, tool call history |
+| **Agent Reasoning** | Center | Streaming agent messages with markdown tables |
+| **Console Logs** | Right | Real-time timestamped logs with emoji indicators |
+
+### Key UI Features
+
+- **Single Repo Selector**: Dropdown to select one repository at a time (ideal for focused demos)
+- **Initialization Overlay**: Shows "Initializing..." state on startup instead of red error indicators
+- **Real-time Streaming**: Events appear in UI immediately as they happen (no batching)
+- **PR URL Display**: Clickable links to created PRs appear in a dedicated section
+- **Per-Repo Checklist**: Step-by-step progress tracking with visual indicators
 
 ### WebSocket Event Types
 
@@ -541,6 +549,7 @@ The backend streams these events via WebSocket (`ws://localhost:8000/ws/agent`):
 | `agent_message` | Agent reasoning/message (supports markdown) |
 | `checklist_update` | Per-repo step completion |
 | `repo_start` / `repo_complete` | Repository processing boundaries |
+| `pr_created` | PR URL captured (clickable in UI) |
 | `console_log` | Streaming log with level (info/success/warning/error) |
 
 ---
@@ -578,20 +587,19 @@ await session.send({"prompt": user_input})
 
 ### Event Streaming Architecture
 
-The UI uses a **queue-based event emission pattern** for thread-safe streaming:
+The UI uses **direct event emission** for real-time streaming without queue delays:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  SDK Event Callback (on_event)                                  │
 │  └─► Synchronous, called from SDK thread                        │
-│      └─► event_queue.put(("tool_start", {...}))                 │
+│      └─► emit_now(coro)  # Uses asyncio.run_coroutine_threadsafe│
 └─────────────────────────────────────────────────────────────────┘
                               │
-                              ▼
+                              ▼ (immediate, no queue)
 ┌─────────────────────────────────────────────────────────────────┐
-│  Queue Processor (async task)                                   │
-│  └─► Drains queue, emits WebSocket events                       │
-│      └─► await self.emit(WSEvent(...))                          │
+│  WebSocket Emit                                                 │
+│  └─► await websocket.send_json(event)                           │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -601,6 +609,8 @@ The UI uses a **queue-based event emission pattern** for thread-safe streaming:
 │      └─► setState updates → UI re-render                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Key insight:** Using `asyncio.run_coroutine_threadsafe(coro, loop)` allows synchronous SDK callbacks to emit events directly to the async WebSocket, ensuring real-time updates without buffering.
 
 ### Tool Call Tracking
 
@@ -614,8 +624,35 @@ tool_call_count += 1
 
 # On tool.execution_complete
 tool_name = active_tool_calls.pop(call_id, None)
-event_queue.put(("tool_complete", {"tool": tool_name, "call_number": tool_call_count}))
+emit_now(self.emit(WSEvent(type=EventType.TOOL_CALL_COMPLETE, data={"tool": tool_name})))
 ```
+
+### PR URL Capture
+
+PR URLs are captured from multiple sources for robustness:
+
+```python
+# 1. From successful `gh pr create` output
+pr_url = _run(["gh", "pr", "create", ...])  # Returns PR URL directly
+
+# 2. From "already exists" error (when PR was previously created)
+except RuntimeError as e:
+    if "already exists" in str(e).lower():
+        pr_match = re.search(r'https://github\.com/[^/]+/[^/]+/pull/\d+', str(e))
+        if pr_match:
+            pr_url = pr_match.group(0)  # Extract from error message
+
+# 3. From assistant messages (LLM often mentions PR URL in response)
+pr_urls = re.findall(r'https://github\.com/[^/]+/[^/]+/pull/\d+', content)
+
+# 4. File-based tracking for cross-module reliability
+log_created_pr(repo_url, pr_url, title)  # Writes to agent/created_prs.json
+```
+
+This ensures PR URLs are captured even when:
+- A PR already exists for the branch
+- The SDK doesn't expose tool results in completion events
+- The agent re-runs against the same repository
 
 ### Heartbeat for Long-Running Tools
 

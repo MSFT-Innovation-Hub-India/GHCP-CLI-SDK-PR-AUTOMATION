@@ -6,27 +6,30 @@ React + FastAPI visual frontend for demonstrating the Fleet Compliance Agent.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ React Frontend (localhost:3001)                                 │
+│ React Frontend (localhost:3000)                                 │
 │ • Multi-panel layout with Tailwind CSS                         │
 │ • Real-time streaming via WebSocket                             │
-│ • Per-repo progress tracking                                    │
+│ • Single repo dropdown selector for demos                       │
 │ • Markdown rendering with remark-gfm                            │
+│ • Clickable PR URLs when created                                │
 └─────────────────────────────────────────────────────────────────┘
                     │ WebSocket
                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ FastAPI Backend (localhost:8000)                                │
 │ • Wraps existing agent_loop.py                                  │
-│ • Queue-based event streaming architecture                      │
+│ • Real-time event streaming via asyncio.run_coroutine_threadsafe│
 │ • Tool call tracking by call_id                                 │
+│ • PR URL capture (including from "already exists" errors)       │
 │ • Heartbeat emitter for long-running tools                      │
 └─────────────────────────────────────────────────────────────────┘
                     │ imports
                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ agent/fleet_agent/agent_loop.py                                 │
-│ • Unchanged - same code used for console mode                   │
-│ • Event emitter callback injected at runtime                    │
+│ • Core agent logic with 11 custom tools                         │
+│ • File-based PR tracking for reliable URL capture               │
+│ • Event callbacks invoked by Copilot SDK                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -80,15 +83,22 @@ npm install
 npm run dev -- --port 3001
 ```
 
-## UI Panels
+## UI Layout
 
-| Panel | Description |
-|-------|-------------|
-| **Control Panel** | Start/stop agent, system status |
-| **Fleet Repositories** | Per-repo cards with progress checklist |
-| **Agent Reasoning** | Streaming agent messages/decisions |
-| **Tool Calls** | Real-time tool execution status |
-| **Console Logs** | Streaming execution logs |
+The UI features a **three-panel layout** optimized for demos:
+
+| Panel | Location | Description |
+|-------|----------|-------------|
+| **Control + Tool Calls** | Left | Repo selector dropdown, run button, checklist, tool call history |
+| **Agent Reasoning** | Center | Streaming agent messages with markdown tables |
+| **Console Logs** | Right | Real-time timestamped logs with emoji indicators |
+
+### Key Features
+
+- **Single Repo Selector**: Dropdown to select one repository at a time (ideal for demos)
+- **Initialization Overlay**: Shows "Initializing..." state on startup instead of red indicators
+- **Real-time Streaming**: Events appear in UI as they happen (not batched)
+- **PR URL Display**: Clickable links to created PRs appear in the left panel
 
 ## WebSocket Events
 
@@ -123,25 +133,27 @@ This UI layer **does not modify** the console-based agent in `agent/fleet_agent/
 
 ## Implementation Details
 
-### Event Streaming Pattern
+### Real-time Event Streaming
 
-The key challenge is emitting events from **synchronous tool handlers** to an **async WebSocket**. We solve this with a queue:
+Events stream to the UI **immediately** as they occur using `asyncio.run_coroutine_threadsafe`:
 
 ```python
-# 1. Agent tool emits event (sync context)
-def emit(event_type: str, data: dict):
-    event_emitter(event_type, data)  # Callback from FastAPI
+# Capture the event loop at session start
+loop = asyncio.get_running_loop()
 
-# 2. FastAPI puts event on queue (thread-safe)
-def on_event(event_type: str, data: dict):
-    event_queue.put_nowait({"type": event_type, **data})
+# Helper to emit from sync SDK callback
+def emit_now(coro):
+    """Schedule async emit to run immediately on event loop."""
+    asyncio.run_coroutine_threadsafe(coro, loop)
 
-# 3. Queue processor forwards to WebSocket (async context)
-async def process_queue():
-    while True:
-        event = await event_queue.get()
-        await websocket.send_json(event)
+# SDK callback (synchronous) emits directly
+def on_event(event):
+    if event.type.value == "tool.execution_start":
+        emit_now(self.emit(WSEvent(type=EventType.TOOL_CALL_START, data={...})))
+        emit_now(self.log("🔎 Starting tool...", "info"))
 ```
+
+This bypasses any queue and ensures events appear in the UI within milliseconds of occurring.
 
 ### Tool Call Tracking
 
@@ -173,15 +185,38 @@ async def heartbeat_emitter():
         await asyncio.sleep(10)  # Every 10 seconds
 ```
 
-### Per-Repository Checklist
+### PR URL Capture
 
-Each repo gets its own checklist card. The key is capturing the repo name **at queue time**, not processing time:
+PR URLs are captured from multiple sources for reliability:
 
 ```python
-# WRONG: Reads self.current_repo later (may have changed)
-event_queue.put_nowait({"repo": self.current_repo, ...})
+# 1. From successful `gh pr create` output
+pr_url = _run(["gh", "pr", "create", ...])  # Returns PR URL
 
-# RIGHT: Capture repo at emit time
-repo = self.current_repo  # Capture now
-event_queue.put_nowait({"repo": repo, ...})
+# 2. From "already exists" error (when PR was already created)
+except RuntimeError as e:
+    if "already exists" in str(e).lower():
+        pr_match = re.search(r'https://github\.com/[^/]+/[^/]+/pull/\d+', str(e))
+        if pr_match:
+            pr_url = pr_match.group(0)  # Extract from error message
+
+# 3. From assistant messages (LLM often mentions PR URL)
+pr_urls = re.findall(r'https://github\.com/[^/]+/[^/]+/pull/\d+', content)
+
+# 4. File-based tracking (cross-module reliability)
+log_created_pr(repo_url, pr_url, title)  # Writes to agent/created_prs.json
 ```
+
+### Per-Repository Checklist
+
+Each repo gets its own checklist card with step-by-step progress tracking:
+
+| Step | Tool | Status |
+|------|------|--------|
+| Policy Knowledge Search | `rag_search` | ✓ |
+| Clone Repository | `clone_repository` | ✓ |
+| Detect Compliance Drift | `detect_compliance_drift` | ✓ |
+| Security Vulnerability Scan | `security_scan` | ⏳ |
+| Apply Compliance Patches | `apply_compliance_patches` | ○ |
+| Run Tests | `run_tests` | ○ |
+| Create Pull Request | `create_pull_request` | ○ |
