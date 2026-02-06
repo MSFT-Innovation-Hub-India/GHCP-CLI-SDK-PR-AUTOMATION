@@ -27,6 +27,10 @@ agent/workspaces/
 # Sample repos (these are separate GitHub repos)
 sample-repos/
 
+# UI
+ui/frontend/node_modules/
+ui/frontend/dist/
+
 # IDE
 .vscode/
 .idea/
