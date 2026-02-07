@@ -27,7 +27,7 @@ React + FastAPI visual frontend for demonstrating the Fleet Compliance Agent.
                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ agent/fleet_agent/agent_loop.py                                 │
-│ • Core agent logic with 11 custom tools                         │
+│ • Core agent logic with 13 custom tools                         │
 │ • File-based PR tracking for reliable URL capture               │
 │ • Event callbacks invoked by Copilot SDK                        │
 └─────────────────────────────────────────────────────────────────┘

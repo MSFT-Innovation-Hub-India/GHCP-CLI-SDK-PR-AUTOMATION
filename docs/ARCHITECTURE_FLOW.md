@@ -24,7 +24,7 @@ flowchart TB
         DECIDE[/"Decides Which Tool to Call<br/>and With What Arguments"/]
     end
 
-    subgraph CustomTools["🔧 11 Custom Tools"]
+    subgraph CustomTools["🔧 13 Custom Tools"]
         T1[rag_search]
         T2[clone_repository]
         T3[detect_compliance_drift]
@@ -33,9 +33,11 @@ flowchart TB
         T6[apply_compliance_patches]
         T7[get_required_approvals]
         T8[run_tests]
-        T9[commit_changes]
-        T10[push_branch]
-        T11[create_pull_request]
+        T9[read_file]
+        T10[fix_code]
+        T11[commit_changes]
+        T12[push_branch]
+        T13[create_pull_request]
     end
 
     subgraph External["🌐 External Services"]
@@ -72,7 +74,7 @@ sequenceDiagram
     participant External as External Services
 
     User->>AgentLoop: Process repositories
-    AgentLoop->>SDK: Create session with 11 tools
+    AgentLoop->>SDK: Create session with 13 tools
     AgentLoop->>SDK: Send user prompt
     
     loop Until session.idle
@@ -109,9 +111,10 @@ flowchart TB
         E --> F[apply_compliance_patches]
         F --> G[get_required_approvals]
         G --> H[run_tests]
-        H --> I[commit_changes]
-        I --> J[push_branch]
-        J --> K[create_pull_request]
+        H --> I[fix_code if needed]
+        I --> J[commit_changes]
+        J --> K[push_branch]
+        K --> L[create_pull_request]
     end
 
     subgraph External["🌐 External Services"]
@@ -138,7 +141,7 @@ flowchart TB
 
 ## Tool Registration (agent_loop.py)
 
-The agentic implementation registers 11 custom tools with the Copilot SDK:
+The agentic implementation registers 13 custom tools with the Copilot SDK:
 
 ```python
 from copilot import CopilotClient
@@ -162,8 +165,8 @@ rag_search_tool = Tool(
 session = await client.create_session({
     "model": "gpt-4o",
     "system_message": {"content": SYSTEM_PROMPT},
-    "tools": [rag_search_tool, clone_tool, ...],
-    "available_tools": ["rag_search", "clone_repository", ...]  # Whitelist
+    "tools": [rag_search_tool, clone_tool, ..., read_file_tool, fix_code_tool],
+    "available_tools": ["rag_search", "clone_repository", ..., "read_file", "fix_code"]  # Whitelist
 })
 ```
 
@@ -203,8 +206,8 @@ session = await client.create_session({
 │                     Azure OpenAI Service                       │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │   ✅ USED: Vector Store                                  │  │
-│  │   • Endpoint: sansri-foundry-hosted-agents-pro.openai... │  │
-│  │   • Vector Store ID: vs_VdxnOBxSZXafnJSjR0g7JBBE         │  │
+│  │   • Endpoint: Configured via AZURE_OPENAI_ENDPOINT       │  │
+│  │   • Vector Store ID: Configured via AZURE_OPENAI_VECTOR_STORE_ID │
 │  │   • Embedding Model: text-embedding-3-small              │  │
 │  │   • Responses API with file_search tool                  │  │
 │  └──────────────────────────────────────────────────────────┘  │
@@ -435,7 +438,7 @@ sequenceDiagram
 
 | Aspect | Implementation |
 |--------|----------------|
-| **Loop Structure** | Sequential per-repo, SDK-driven tool calls |
+| **Loop Structure** | Sequential per-repo, SDK-driven tool calls (13 tools) |
 | **Tool Autonomy** | Yes - SDK decides tool order based on reasoning |
 | **State Persistence** | Global: evidence, settings. Per-repo: workspace, drift, branch |
 | **Memory** | No long-term memory; fresh workspace each run |

@@ -174,7 +174,7 @@ Open `agent/fleet_agent/agent_loop.py`:
 from copilot import CopilotClient
 from copilot.types import Tool, ToolResult
 
-# Create session with 11 custom tools
+# Create session with 13 custom tools
 session = await client.create_session({
     "system_message": {"content": SYSTEM_PROMPT},
     "tools": tools,

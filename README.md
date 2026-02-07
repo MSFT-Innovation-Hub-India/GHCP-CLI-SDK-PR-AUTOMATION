@@ -12,7 +12,17 @@ This demo showcases a Python-based compliance agent that automatically enforces 
 
 The **GitHub Copilot CLI SDK** unlocks exactly this. By exposing the Copilot CLI through a Python SDK, it transforms from a conversational tool into a **programmable agent brain**.
 
-**How It Works:** The Python SDK spawns the Copilot CLI as a **background server process** and communicates with it via IPC. Your code registers tools, sends prompts, and receives events - while the CLI handles authentication, model communication, and token management.
+**How It Works:** The Python SDK spawns the Copilot CLI in **server mode** and communicates via **JSON-RPC**. Your code registers tools, sends prompts, and receives events - while the CLI handles authentication, model communication, and token management.
+
+```
+Your Application
+       ↓
+   SDK Client
+       ↓ JSON-RPC
+Copilot CLI (server mode)
+       ↓
+  GitHub Copilot API
+```
 
 ```python
 # The SDK starts the CLI in server mode and manages the session
@@ -44,7 +54,7 @@ This demo implements **automated fleet-wide compliance enforcement** - an AI age
 | Capability | How It's Used | Implementation |
 |------------|---------------|----------------|
 | **SDK as Orchestrating Agent** | Copilot SDK is the "brain" that drives the entire compliance workflow end-to-end | SDK receives a single prompt, then autonomously executes all steps |
-| **Autonomous Tool Calling** | SDK decides which tools to invoke based on the task | 11 custom tools registered with the SDK |
+| **Autonomous Tool Calling** | SDK decides which tools to invoke based on the task | 13 custom tools registered with the SDK |
 | **Function Calling** | Tools return structured JSON that the SDK reasons over | Each tool returns `ToolResult` with JSON payload |
 | **MCP Server Integration** | External services for approvals and security scans | Change Mgmt (port 4101), Security (port 4102) |
 | **RAG (Retrieval-Augmented Generation)** | Policy evidence grounded in organizational knowledge | Azure OpenAI Vector Store with Responses API |
@@ -92,10 +102,10 @@ This demo implements **automated fleet-wide compliance enforcement** - an AI age
 │  │         │                  │                  │                        │  │
 │  │         ▼                  ▼                  ▼                        │  │
 │  │  ┌─────────────────────────────────────────────────────────────┐       │  │
-│  │  │          11 CUSTOM TOOLS (Registered with SDK)              │       │  │
+│  │  │          13 CUSTOM TOOLS (Registered with SDK)              │       │  │
 │  │  │  rag_search → clone → detect_drift → security_scan →        │       │  │
 │  │  │  create_branch → apply_patches → get_approvals →            │       │  │
-│  │  │  run_tests → commit → push → create_pull_request            │       │  │
+│  │  │  run_tests → read_file → fix_code → commit → push → PR      │       │  │
 │  │  └───────────────────────────┬─────────────────────────────────┘       │  │
 │  └──────────────────────────────┼─────────────────────────────────────────┘  │
 │                                 │                                            │
@@ -149,7 +159,8 @@ The agent executes a compliance workflow in **three phases**:
 | Step | Tool | What Happens |
 |------|------|--------------|
 | 7 | `get_required_approvals` | Send modified file list to Change Mgmt MCP to determine approvers |
-| 8 | `run_tests` | Run pytest on modified code (auto-retry with fixes up to 3 times) |
+| 8 | `run_tests` | Run pytest on modified code |
+| 8a | `read_file` + `fix_code` | *(If tests fail)* Read failing file, use SDK to generate fix, retry up to 3 times |
 | 9 | `commit_changes` | Commit all modifications |
 | 10 | `push_branch` | Push branch to GitHub |
 | 11 | `create_pull_request` | Open PR with policy evidence, vulnerability report, approval labels |
@@ -162,8 +173,8 @@ ORIGINAL CODE                              MODIFIED CODE
      ▼                                          ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  clone → detect_drift → security_scan    │   apply_patches → run_tests   │
-│         (analyze original)               │   (modify & validate)         │
-│                                          │                               │
+│         (analyze original)               │   → fix_code (if needed)      │
+│                                          │   (modify & validate)         │
 │  ◄────── BEFORE changes ──────►          │  ◄────── AFTER changes ─────► │
 └──────────────────────────────────────────────────────────────────────────┘
                                        ▲
@@ -348,6 +359,9 @@ ghcp-cli-sdk-sample1/
 ├── scripts/
 │   ├── deploy-vector-store.py  # Deploy Azure OpenAI vector store
 │   └── push-sample-repos.ps1   # Push samples to GitHub
+│
+├── images/
+│   └── solution-architecture.png  # Architecture diagram
 │
 ├── ui/
 │   ├── frontend/               # React app (Vite + Tailwind)
