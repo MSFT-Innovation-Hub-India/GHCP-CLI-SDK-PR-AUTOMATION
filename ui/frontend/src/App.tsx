@@ -148,7 +148,7 @@ function ToolCallDisplay({ toolCall }: { toolCall: ToolCall }) {
             <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />
           )}
         </div>
-        <div className="text-xs text-gray-500 truncate">
+        <div className="text-xs text-gray-500 truncate" title={JSON.stringify(toolCall.args)}>
           {JSON.stringify(toolCall.args).substring(0, 80)}...
         </div>
       </div>
@@ -741,6 +741,7 @@ export default function App() {
                     href={pr}
                     target="_blank"
                     rel="noopener noreferrer"
+                    title={pr}
                     className="block text-sm text-green-300 hover:text-green-200 truncate"
                   >
                     <ExternalLink className="w-3 h-3 inline mr-1" />
