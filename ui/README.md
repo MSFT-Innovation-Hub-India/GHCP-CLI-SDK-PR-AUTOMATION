@@ -37,7 +37,15 @@ React + FastAPI visual frontend for demonstrating the Fleet Compliance Agent.
 
 1. **MCP Servers running** (ports 4101, 4102)
    ```powershell
-   .\scripts\start-mcp-servers.ps1
+   # Terminal 1
+   cd mcp\change_mgmt
+   .venv\Scripts\Activate.ps1
+   uvicorn server:app --host 0.0.0.0 --port 4101
+   
+   # Terminal 2
+   cd mcp\security
+   .venv\Scripts\Activate.ps1
+   uvicorn server:app --host 0.0.0.0 --port 4102
    ```
 
 2. **Python environment** with agent dependencies
@@ -56,16 +64,19 @@ React + FastAPI visual frontend for demonstrating the Fleet Compliance Agent.
 
 ## Quick Start
 
+**Terminal 1 - Backend:**
 ```powershell
-# From project root
-.\scripts\start-ui.ps1
+cd ui\backend
+..\..\agent\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-This will:
-1. Start FastAPI backend on http://localhost:8000
-2. Start React frontend on http://localhost:3001
+**Terminal 2 - Frontend:**
+```powershell
+cd ui\frontend
+npm run dev
+```
 
-Open http://localhost:3001 and click **"Run Fleet Agent"**.
+Open http://localhost:3000 (or port shown by Vite) and click **"Run Fleet Agent"**.
 
 ## Manual Start
 

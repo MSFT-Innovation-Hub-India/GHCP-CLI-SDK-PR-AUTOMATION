@@ -502,12 +502,7 @@ ghcp-cli-sdk-sample1/
 │   └── contoso-payments-api/
 │
 ├── scripts/                    # Helper scripts
-│   ├── setup.ps1               # Initial setup
-│   ├── start-mcp-servers.ps1   # Start MCP servers
-│   ├── stop-mcp-servers.ps1    # Stop MCP servers
-│   ├── run-agent-agentic.ps1   # Run the agent (console mode)
-│   ├── start-ui.ps1            # Run the agent (visual UI mode)
-│   ├── deploy-vector-store.ps1 # Deploy Azure OpenAI vector store
+│   ├── deploy-vector-store.py  # Deploy Azure OpenAI vector store
 │   └── push-sample-repos.ps1   # Push samples to GitHub
 │
 ├── ui/                         # Visual UI (React + FastAPI)
@@ -691,26 +686,7 @@ Note the **vector_store_id** (format: `vs_xxxxxxxxxxxx`) for configuration.
 
 ---
 
-### Option 1: Automated Setup (Recommended)
-
-```powershell
-# 1. Clone the demo
-cd ghcp-cli-sdk-sample1
-
-# 2. Run setup script
-.\scripts\setup.ps1
-
-# 3. Create and push sample repos
-.\scripts\push-sample-repos.ps1 -GitHubOrg YOUR_USERNAME -CreateRepos
-
-# 4. Start MCP servers (leave running)
-.\scripts\start-mcp-servers.ps1
-
-# 5. Run the agent (in new terminal)
-.\scripts\run-agent-agentic.ps1
-```
-
-### Option 2: Manual Setup
+### Setup
 
 #### Step 1: Create GitHub Repos
 
@@ -932,15 +908,31 @@ For demos and presentations, a visual UI provides real-time streaming of agent a
 > The agent uses the **local user's credentials** for GitHub operations and Azure OpenAI access.
 ### Quick Start
 
+**Start MCP Servers (2 terminals):**
 ```powershell
-# Prerequisites: MCP servers running
-.\scripts\start-mcp-servers.ps1
+# Terminal 1 - Change Management MCP
+cd mcp\change_mgmt
+.venv\Scripts\Activate.ps1
+uvicorn server:app --host 0.0.0.0 --port 4101
 
-# Start both frontend and backend
-.\scripts\start-ui.ps1
-
-# Open http://localhost:3000 in browser
+# Terminal 2 - Security MCP
+cd mcp\security
+.venv\Scripts\Activate.ps1
+uvicorn server:app --host 0.0.0.0 --port 4102
 ```
+
+**Start UI (2 terminals):**
+```powershell
+# Terminal 3 - FastAPI Backend
+cd ui\backend
+..\..\agent\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+# Terminal 4 - React Frontend
+cd ui\frontend
+npm run dev
+```
+
+**Open:** http://localhost:3000 (or the port shown by Vite)
 
 ### UI Layout
 
@@ -1346,11 +1338,7 @@ gh label create needs-security-approval --description "Requires Security approva
    ```powershell
    netstat -an | findstr "4101 4102"
    ```
-3. Restart servers:
-   ```powershell
-   .\scripts\stop-mcp-servers.ps1
-   .\scripts\start-mcp-servers.ps1
-   ```
+3. Restart servers manually (see Running the Demo section above)
 
 ---
 
