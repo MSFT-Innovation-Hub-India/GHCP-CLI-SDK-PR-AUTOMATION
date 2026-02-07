@@ -67,6 +67,8 @@ This demo implements **automated fleet-wide compliance enforcement** - an AI age
 
 ## 🏗️ Architecture
 
+![Solution Architecture](images/solution-architecture.png)
+
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                         FLEET COMPLIANCE AGENT                               │
