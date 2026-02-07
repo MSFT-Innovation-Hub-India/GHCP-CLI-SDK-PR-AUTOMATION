@@ -2,20 +2,57 @@
 
 **Demonstrating GitHub Copilot CLI/SDK Integration for Enterprise Fleet Management**
 
-This demo showcases a Python-based compliance agent that automatically enforces organizational policies across a fleet of microservices using GitHub Copilot CLI SDK capabilities.
+This demo showcases a Python-based compliance agent that automatically enforces organizational policies across a fleet of microservices using GitHub Copilot [CLI SDK](https://github.com/github/copilot-sdk) capabilities.
 
 ---
 
-## 🎯 What This Demo Proves
+## 💡 From Interactive CLI to Programmable Agent
 
-| Capability | Description |
-|------------|-------------|
-| **Fleet-Wide Enforcement** | Automate compliance across multiple repos (vs single-repo manual reviews) |
-| **Multi-Step Orchestration** | Clone → Detect Drift → RAG Evidence → MCP Calls → Patch → Test → PR |
-| **Policy-as-Code** | Knowledge base searchable via RAG for evidence-backed PRs |
-| **Risk-Aware Routing** | Change management determines approvals based on service tier and file patterns |
-| **Security Integration** | Dependency vulnerability scanning with SLA-based response |
-| **Copilot SDK Ready** | Single integration point for AI-powered PR descriptions |
+**GitHub Copilot CLI** is typically used for interactive, natural language conversations - a developer types a question and gets a response. But what if you could harness that same AI capability **programmatically**?
+
+The **GitHub Copilot CLI SDK** unlocks exactly this. By exposing the Copilot CLI through a Python SDK, it transforms from a conversational tool into a **programmable agent brain**.
+
+**The Key Insight:** Instead of a human typing prompts, this demo shows how **code can drive the conversation** - sending structured prompts to the SDK, registering custom tools, and letting the SDK autonomously decide the execution path.
+
+```python
+# The SDK becomes the "brain" - you register tools, it decides when to call them
+session = await client.create_session({
+    "system_message": {"content": SYSTEM_PROMPT},
+    "tools": [clone_tool, detect_drift_tool, apply_patches_tool, ...],
+})
+await session.send({"prompt": "Enforce compliance on contoso-payments-api"})
+# SDK autonomously calls tools, reasons over results, and completes the workflow
+```
+
+This pattern enables **enterprise automation scenarios** that would be impossible with interactive CLI usage alone.
+
+---
+
+## 🎯 What This Demo Demonstrates
+
+### SDK & AI Capabilities
+
+| Capability | How It's Used | Implementation |
+|------------|---------------|----------------|
+| **SDK as Orchestrating Agent** | Copilot SDK is the "brain" that drives the entire compliance workflow end-to-end | SDK receives a single prompt, then autonomously executes all steps |
+| **Autonomous Tool Calling** | SDK decides which tools to invoke based on the task | 11 custom tools registered with the SDK |
+| **Function Calling** | Tools return structured JSON that the SDK reasons over | Each tool returns `ToolResult` with JSON payload |
+| **MCP Server Integration** | External services for approvals and security scans | Change Mgmt (port 4101), Security (port 4102) |
+| **RAG (Retrieval-Augmented Generation)** | Policy evidence grounded in organizational knowledge | Azure OpenAI Vector Store with file_search |
+| **Multi-Step Reasoning** | SDK chains tools: clone → analyze → patch → test → PR | Event-driven workflow with state tracking |
+| **Real-Time Event Streaming** | Live UI updates as agent executes | WebSocket events via `asyncio.run_coroutine_threadsafe` |
+
+### Compliance Domain Features
+
+| Feature | Description | Policy Reference |
+|---------|-------------|------------------|
+| **Fleet-Wide Enforcement** | Automate compliance across multiple repos | - |
+| **Health Endpoint Detection** | Identify missing `/healthz` and `/readyz` endpoints | OPS-2.1 |
+| **Structured Logging** | Detect and add structlog configuration | OBS-1.1 |
+| **Trace Propagation** | Add middleware for W3C traceparent correlation | OBS-3.2 |
+| **Security Vulnerability Scanning** | Scan dependencies for CVEs (Common Vulnerabilities and Exposures) via MCP server | SEC-2.4 |
+| **Risk-Aware Approvals** | Route PRs to appropriate approvers based on service tier | CM-7 |
+| **Evidence-Backed PRs** | Include policy citations in PR descriptions | REL-1.0 |
 
 ---
 
@@ -72,16 +109,6 @@ ORIGINAL CODE                              MODIFIED CODE
                                  Branch created
                                  Code modified here
 ```
-
-### Key Clarifications
-
-| Question | Answer |
-|----------|--------|
-| When is drift detected? | **BEFORE** changes - on the original repo code |
-| When is security scan done? | **BEFORE** changes - on original requirements.txt |
-| When are approvals determined? | **AFTER** changes - based on which files were modified |
-| When are tests run? | **AFTER** changes - to validate the new code works |
-| What does the PR contain? | The diff between original and modified code |
 
 ### Concrete Example: contoso-payments-api
 
@@ -142,12 +169,12 @@ Before you begin, ensure you have the following:
 
 ### Azure Requirements
 
-This project uses **Azure OpenAI's native Vector Store** (via the OpenAI-compatible API), **NOT** Azure AI Search or Azure AI Foundry indexes.
+This project uses **Azure OpenAI's native Vector Store** (via the OpenAI-compatible API), **NOT** Azure AI Search or Azure AI Foundry indexes. Search is not accessible directly by API (which OpenAI API supports), but only through Responses API, hence an LLM is required 
 
 | Resource | Purpose |
 |----------|---------|
 | **Azure OpenAI Service** | Hosts the model and vector store |
-| **Model Deployment** (e.g., `gpt-4o`) | Required for Responses API with `file_search` |
+| **Model Deployment** (e.g., `gpt-4o`) | Required for Responses API with `file_search`. |
 | **Vector Store** | Stores policy documents for RAG search |
 
 **RBAC Requirements:** The user running this demo must have:
@@ -161,7 +188,7 @@ This project uses **Azure OpenAI's native Vector Store** (via the OpenAI-compati
 #### Step 0: Clone This Repository
 
 ```powershell
-git clone https://github.com/YOUR_ORG/ghcp-cli-sdk-sample1.git
+git clone https://github.com/MSFT-Innovation-Hub-India/GHCP-CLI-SDK-PR-AUTOMATION.git
 cd ghcp-cli-sdk-sample1
 ```
 
@@ -358,29 +385,7 @@ npm run dev
 
 This demo implements a pattern that is **directly applicable to enterprise production environments**. The underlying use case - automated compliance enforcement via AI agents - is increasingly common in platform engineering and DevSecOps.
 
-### The Use Case: AI-Powered Platform Engineering
-
-Organizations managing hundreds of microservices face a common challenge: **enforcing consistency at scale**. Manual code reviews can't keep pace with the need to ensure every service has:
-- Proper health endpoints for Kubernetes
-- Structured logging for observability platforms
-- Security vulnerability remediation
-- Compliance with internal standards
-
-**This agent demonstrates automated enforcement**: an AI agent that understands policies, detects drift, and proposes fixes via Pull Requests - keeping humans in the approval loop.
-
-### How This POC Implements It
-
-| Component | POC Implementation | Purpose |
-|-----------|-------------------|---------|
-| **Agent Runtime** | Single Python process | Orchestrates compliance workflow |
-| **AI Brain** | GitHub Copilot SDK | Autonomous decision-making for tool selection |
-| **Policy Knowledge** | Azure OpenAI Vector Store + RAG | Grounds agent decisions in organizational policies |
-| **Integration Layer** | MCP Servers (HTTP) | Connects to approval workflows and security scanners |
-| **Execution** | GitHub CLI | Git operations and PR creation |
-| **UI** | React + WebSocket | Real-time visibility for single user |
-| **State** | JSON files | PR tracking during execution |
-
-**Limitations of the POC:**
+**Limitations of the Solution:**
 - Single-user, single-machine execution
 - No persistent state between runs
 - No authentication/authorization
@@ -472,11 +477,13 @@ ghcp-cli-sdk-sample1/
 │   ├── config/
 │   │   └── repos.json          # Target repositories
 │   ├── fleet_agent/
+│   │   ├── __init__.py         
 │   │   ├── agent_loop.py       # Main agentic entry point (SDK-driven)
 │   │   ├── github_ops.py       # Git/GitHub operations
 │   │   ├── mcp_clients.py      # MCP server clients
 │   │   ├── patcher_fastapi.py  # Code patching logic
 │   │   └── rag.py              # Knowledge base search (Azure OpenAI)
+│   ├── test_sdk_response.py    # SDK response parsing tests
 │   ├── requirements.txt
 │   └── .env.example
 │
@@ -552,387 +559,6 @@ The sample FastAPI microservices used as compliance targets are hosted in separa
 
 ---
 
-## �🚀 Quick Start
-
-### Prerequisites
-
-#### Required Tools
-
-| Tool | Purpose | Installation |
-|------|---------|--------------|
-| **Python 3.11+** | Agent runtime | [python.org](https://www.python.org/downloads/) |
-| **Git** | Source control | [git-scm.com](https://git-scm.com/) |
-| **GitHub CLI** | Repo operations & PRs | See below |
-| **Node.js 18+** | Copilot CLI runtime | [nodejs.org](https://nodejs.org/) |
-| **Azure CLI** | Azure authentication (for RAG) | See below |
-
-#### Azure Resources (for RAG)
-
-| Resource | Purpose |
-|----------|---------|
-| **Azure OpenAI Service** | Responses API with file_search |
-| **Vector Store** | Native OpenAI vector store (not Azure AI Search) |
-
----
-
-### Step-by-Step Installation
-
-#### 1. Install GitHub CLI
-
-**Windows (winget):**
-```powershell
-winget install GitHub.cli
-```
-
-**macOS (Homebrew):**
-```bash
-brew install gh
-```
-
-**Verify installation:**
-```powershell
-gh --version
-```
-
-#### 2. Authenticate GitHub CLI
-
-```powershell
-gh auth login
-```
-
-Follow the prompts to authenticate with GitHub. Select:
-- GitHub.com
-- HTTPS
-- Login with a web browser (or paste token)
-
-Verify authentication:
-```powershell
-gh auth status
-```
-
-#### 3. Install Node.js and Copilot CLI
-
-**Windows (winget):**
-```powershell
-winget install OpenJS.NodeJS.LTS
-```
-
-**Install GitHub Copilot CLI globally:**
-```powershell
-npm install -g @anthropic-ai/copilot
-```
-
-**Verify installation:**
-```powershell
-copilot --version
-```
-
-> **Windows Note:** The Copilot CLI path is typically `C:\Users\<username>\AppData\Roaming\npm\copilot.cmd`. You may need to set `COPILOT_CLI_PATH` in your `.env` file (see configuration section).
-
-#### 4. Install Azure CLI (for RAG with Azure OpenAI)
-
-**Windows (winget):**
-```powershell
-winget install Microsoft.AzureCLI
-```
-
-**macOS (Homebrew):**
-```bash
-brew install azure-cli
-```
-
-**Login to Azure:**
-```powershell
-az login
-```
-
-This enables `DefaultAzureCredential` for authenticating with Azure OpenAI without API keys.
-
-#### 5. Create Azure OpenAI Vector Store
-
-The RAG component uses Azure OpenAI's Responses API with file_search. You need a **native OpenAI vector store** (not Azure AI Search/Foundry index).
-
-**Create vector store via API:**
-```powershell
-# Get Azure AD token
-$token = az account get-access-token --resource https://cognitiveservices.azure.com --query accessToken -o tsv
-
-# Create vector store
-$headers = @{
-    "Authorization" = "Bearer $token"
-    "Content-Type" = "application/json"
-    "api-version" = "2025-03-01-preview"
-}
-
-$body = @{
-    name = "fleet-compliance-knowledge"
-} | ConvertTo-Json
-
-Invoke-RestMethod -Uri "https://YOUR_ENDPOINT.openai.azure.com/openai/v1/vector_stores" `
-    -Method POST -Headers $headers -Body $body
-```
-
-**Upload knowledge files:**
-```powershell
-# Upload each file from knowledge/ folder
-$files = Get-ChildItem .\knowledge\*.md
-foreach ($file in $files) {
-    # Upload file and add to vector store
-    # See Azure OpenAI documentation for file upload API
-}
-```
-
-Note the **vector_store_id** (format: `vs_xxxxxxxxxxxx`) for configuration.
-
----
-
-### Setup
-
-#### Step 1: Create GitHub Repos
-
-Create 3 empty repos (private is fine):
-- `contoso-catalog-api`
-- `contoso-orders-api`
-- `contoso-payments-api`
-
-#### Step 2: Push Sample Repos
-
-```bash
-cd sample-repos/contoso-orders-api
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/YOUR_ORG/contoso-orders-api.git
-git push -u origin main
-```
-Repeat for payments and catalog.
-
-#### Step 3: Configure Agent
-
-**Edit `agent/config/repos.json`:**
-```json
-{
-  "repos": [
-    "https://github.com/YOUR_ORG/contoso-orders-api.git",
-    "https://github.com/YOUR_ORG/contoso-payments-api.git",
-    "https://github.com/YOUR_ORG/contoso-catalog-api.git"
-  ]
-}
-```
-
-**Create `agent/.env` from template:**
-```powershell
-cd agent
-copy .env.example .env
-```
-
-**Configure environment variables in `agent/.env`:**
-```env
-# Azure OpenAI RAG Configuration
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_DEPLOYMENT=gpt-4o
-AZURE_OPENAI_API_VERSION=2025-03-01-preview
-AZURE_OPENAI_VECTOR_STORE_ID=vs_xxxxxxxxxxxx
-
-# GitHub Copilot SDK Configuration (agent uses SDK as brain)
-COPILOT_CLI_PATH=C:\Users\YOUR_USERNAME\AppData\Roaming\npm\copilot.cmd
-
-# MCP Server Ports (optional, defaults shown)
-CHANGE_MGMT_URL=http://localhost:4101
-SECURITY_URL=http://localhost:4102
-```
-
-> **Important:** On Windows, the Copilot SDK requires `COPILOT_CLI_PATH` to locate the CLI binary. Find your path with: `npm list -g @anthropic-ai/copilot`
-
-#### Step 4: Start MCP Servers
-
-Terminal 1:
-```bash
-cd mcp/change_mgmt
-python -m venv .venv
-.venv\Scripts\Activate.ps1  # Windows
-pip install -r requirements.txt
-uvicorn server:app --port 4101
-```
-
-Terminal 2:
-```bash
-cd mcp/security
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn server:app --port 4102
-```
-
-#### Step 5: Run the Agent
-
-Terminal 3:
-```bash
-cd agent
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-cp .env.example .env
-python -m fleet_agent.run
-```
-
----
-
-## 🔍 What Happens During the Demo
-
-1. **Agent starts** and reads target repos from `config/repos.json`
-
-2. **For each repository:**
-   - Clones the repo to `agent/workspaces/`
-   - Detects compliance drift (missing health endpoints, logging, etc.)
-   - Searches knowledge base for policy evidence
-   - Calls Security MCP to scan dependencies
-   - Calls Change Mgmt MCP to determine approvals
-
-3. **If drift detected:**
-   - Creates a feature branch
-   - Applies fixes (adds endpoints, middleware, logging)
-   - Runs local tests
-   - Commits changes
-   - Opens PR with policy evidence and appropriate labels
-
-4. **PR labels based on CM-7:**
-   - `needs-sre-approval` for high-impact services (payments)
-   - `needs-security-approval` for auth/secret file changes
-   - Standard PRs get `ready-for-review`
-
-### Workspace Isolation
-
-Each repository is cloned into a **unique, isolated workspace directory**:
-
-```
-agent/workspaces/
-├── contoso-orders-api-Xa7kM2/      # Unique ID suffix (nanoid)
-├── contoso-payments-api-9bPqL1/
-└── contoso-catalog-api-nR3xWv/
-```
-
-**Why separate workspaces?**
-
-| Reason | Explanation |
-|--------|-------------|
-| **Isolation** | Changes to one repo don't affect others |
-| **Parallel safety** | Multiple repos can be processed without conflicts |
-| **Clean state** | Each run starts with a fresh clone (no stale state) |
-| **Debugging** | Workspaces persist after run for inspection |
-| **Idempotency** | Re-running creates new workspace, avoiding merge conflicts |
-
-**What happens in each workspace:**
-
-1. **Clone** - Shallow clone (`--depth 1`) of the repo
-2. **Analysis** - `patcher_fastapi.py` reads files to detect drift
-3. **Branch** - Feature branch created locally
-4. **Patching** - Code modifications written directly to files:
-   - `app/main.py` - Health endpoints, middleware imports
-   - `app/middleware.py` - New file for request context
-   - `app/logging_config.py` - New file for structlog setup
-   - `requirements.txt` - Dependencies added
-   - `tests/test_health.py` - New test file
-5. **Testing** - `pytest` runs inside the workspace against modified code
-6. **Git operations** - Commit, push, and PR creation happen from workspace
-
-**Cleanup:** Workspaces are in `.gitignore` and can be manually deleted after demos. They are NOT automatically cleaned up (useful for debugging failures).
-
----
-
-## � Compliance Gaps in Sample Repos
-
-The sample repos contain realistic "tech debt" that the agent will detect and remediate:
-
-| Violation | Policy | All Repos | Payments Only |
-|-----------|--------|:---------:|:-------------:|
-| Missing `/healthz` endpoint | OPS-2.1 | ✓ | |
-| Missing `/readyz` endpoint | OPS-2.1 | ✓ | |
-| No structured logging (uses `print()`) | OBS-1.1 | ✓ | |
-| No correlation middleware | OBS-3.2 | ✓ | |
-| Vulnerable `requests==2.19.0` | SEC-2.4 | | ✓ |
-
-**Detection method:** The agent uses string pattern matching (not comments or hints):
-- Checks if `"/healthz"` appears in code
-- Checks if `structlog` is imported
-- Checks if `RequestContextMiddleware` exists
-- Security MCP scans `requirements.txt` versions against CVE database
-
-**Payments is "high-impact":** The word "payments" in the service name triggers CM-7.2, requiring SRE-Prod approval.
-
----
-
-## �📋 Sample PR Output
-
-The agent creates PRs like this:
-
-```markdown
-## Summary
-This PR enforces fleet compliance policies across the service.
-
-## Changes
-- app/main.py (health endpoints, middleware)
-- app/middleware.py (correlation ID handling)
-- app/logging_config.py (structured logging)
-- requirements.txt (structlog dependency)
-- tests/test_health.py (compliance tests)
-
-## Policy Compliance
-- OPS-2.1: Added /healthz and /readyz endpoints
-- OBS-1.1: Configured structlog for JSON logging
-- OBS-3.2: Added RequestContextMiddleware for trace correlation
-
-## Evidence (Policies Referenced)
-- **OPS-2.1**: Health endpoints MUST return JSON with status, service, version...
-- **OBS-1.1**: Logs MUST be structured JSON in production...
-- **OBS-3.2**: Accept inbound W3C traceparent header...
-
-[Labels: needs-sre-approval, compliance]
-```
-
----
-
-## �️ Visual UI Mode (React + FastAPI)
-
-For demos and presentations, a visual UI provides real-time streaming of agent activity.
-> **⚠️ Important: Single-User Local Application**
->
-> This React-based web app is designed for **single-user, local execution only**. It is NOT intended to be hosted on a web server for concurrent multi-user access.
->
-> **Prerequisites for the logged-in user:**
-> - Authenticated with GitHub CLI: `gh auth login`
-> - Authenticated with Azure: `az login`
-> - GitHub Copilot CLI installed and SDK dependencies met
->
-> The agent uses the **local user's credentials** for GitHub operations and Azure OpenAI access.
-### Quick Start
-
-**Start MCP Servers (2 terminals):**
-```powershell
-# Terminal 1 - Change Management MCP
-cd mcp\change_mgmt
-.venv\Scripts\Activate.ps1
-uvicorn server:app --host 0.0.0.0 --port 4101
-
-# Terminal 2 - Security MCP
-cd mcp\security
-.venv\Scripts\Activate.ps1
-uvicorn server:app --host 0.0.0.0 --port 4102
-```
-
-**Start UI (2 terminals):**
-```powershell
-# Terminal 3 - FastAPI Backend
-cd ui\backend
-..\..\agent\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
-
-# Terminal 4 - React Frontend
-cd ui\frontend
-npm run dev
-```
-
-**Open:** http://localhost:3000 (or the port shown by Vite)
 
 ### UI Layout
 
