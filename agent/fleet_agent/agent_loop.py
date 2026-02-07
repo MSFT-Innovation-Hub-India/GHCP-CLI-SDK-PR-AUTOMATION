@@ -97,7 +97,8 @@ Given repository URLs, you must:
 4. Scan for security vulnerabilities
 5. Apply compliance patches
 6. Run tests to validate changes
-7. Create Pull Requests with evidence-backed descriptions
+7. **If tests fail, debug and fix the code**
+8. Create Pull Requests with evidence-backed descriptions
 
 ## Workflow
 For EACH repository, follow this sequence:
@@ -109,13 +110,30 @@ For EACH repository, follow this sequence:
 6. apply_compliance_patches - Fix compliance issues
 7. get_required_approvals - Determine who must approve
 8. run_tests - Validate the changes work
-9. commit_changes - Commit the fixes
-10. push_branch - Push to remote
-11. create_pull_request - Open PR with detailed description
+9. **IF TESTS FAIL**: Use read_file and fix_code tools to debug and fix
+10. **Re-run tests** until they pass (max 3 attempts)
+11. commit_changes - Commit the fixes
+12. push_branch - Push to remote
+13. create_pull_request - Open PR with detailed description
+
+## Test Failure Handling (IMPORTANT!)
+When run_tests returns passed=false:
+1. Read the error output carefully
+2. Use read_file to examine the failing file
+3. Use fix_code with the error message to apply a fix
+4. Run tests again
+5. Repeat up to 3 times before giving up
+
+Example fix workflow:
+- run_tests → failed with "ImportError: cannot import name 'app' from 'main'"
+- read_file("app/main.py") → see the actual code
+- fix_code(file_path="tests/test_health.py", error_message="ImportError: ...") → fix the import
+- run_tests → passed!
 
 ## Important Rules
 - Process repositories ONE AT A TIME to completion
 - Always search RAG FIRST to understand policy requirements
+- **Never skip test failures - always attempt to fix them**
 - Include policy evidence in PR descriptions
 - Add approval labels based on MCP response
 - Report progress after each major step
@@ -651,6 +669,132 @@ def create_tools() -> list[Tool]:
         }
     )
 
+    # --- Read File Tool ---
+    def read_file_handler(invocation) -> ToolResult:
+        """Read a file from the cloned repository."""
+        args = _get_args(invocation)
+        repo_url = args.get("repo_url", "")
+        file_path = args.get("file_path", "")
+        
+        ws = _workspace_registry.get(repo_url)
+        if not ws:
+            return ToolResult(error="Repository not cloned. Call clone_repository first.")
+        
+        try:
+            full_path = ws / file_path
+            if not full_path.exists():
+                return ToolResult(textResultForLlm=json.dumps({
+                    "success": False,
+                    "error": f"File not found: {file_path}"
+                }))
+            
+            content = full_path.read_text(encoding="utf-8")
+            return ToolResult(textResultForLlm=json.dumps({
+                "success": True,
+                "file_path": file_path,
+                "content": content[:10000],  # Limit to 10k chars
+                "truncated": len(content) > 10000
+            }))
+        except Exception as e:
+            return ToolResult(error=str(e))
+
+    read_file_tool = Tool(
+        name="read_file",
+        description="Read the contents of a file from the cloned repository. Use this to examine code before fixing errors.",
+        handler=read_file_handler,
+        parameters={
+            "type": "object",
+            "properties": {
+                "repo_url": {
+                    "type": "string",
+                    "description": "The repository URL (must have been cloned first)"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Relative path to the file (e.g., 'app/main.py', 'tests/test_health.py')"
+                }
+            },
+            "required": ["repo_url", "file_path"]
+        }
+    )
+
+    # --- Fix Code Tool (SDK-Powered) ---
+    def fix_code_handler(invocation) -> ToolResult:
+        """Fix code using the Copilot SDK based on error messages."""
+        args = _get_args(invocation)
+        repo_url = args.get("repo_url", "")
+        file_path = args.get("file_path", "")
+        error_message = args.get("error_message", "")
+        
+        ws = _workspace_registry.get(repo_url)
+        if not ws:
+            return ToolResult(error="Repository not cloned. Call clone_repository first.")
+        
+        try:
+            full_path = ws / file_path
+            if not full_path.exists():
+                return ToolResult(error=f"File not found: {file_path}")
+            
+            original_content = full_path.read_text(encoding="utf-8")
+            
+            # Use sync helper to call SDK (we're in a sync handler)
+            fixed_content = _fix_code_with_sdk(original_content, file_path, error_message)
+            
+            if fixed_content and fixed_content != original_content:
+                # Validate syntax before writing
+                import ast
+                try:
+                    if file_path.endswith(".py"):
+                        ast.parse(fixed_content)
+                except SyntaxError as e:
+                    return ToolResult(textResultForLlm=json.dumps({
+                        "success": False,
+                        "error": f"SDK generated invalid syntax: {e.msg} at line {e.lineno}",
+                        "file_path": file_path
+                    }))
+                
+                # Write the fixed content
+                full_path.write_text(fixed_content, encoding="utf-8")
+                return ToolResult(textResultForLlm=json.dumps({
+                    "success": True,
+                    "file_path": file_path,
+                    "message": f"Fixed {file_path} based on error",
+                    "changes_made": True
+                }))
+            else:
+                return ToolResult(textResultForLlm=json.dumps({
+                    "success": False,
+                    "file_path": file_path,
+                    "message": "SDK could not determine a fix",
+                    "changes_made": False
+                }))
+        except Exception as e:
+            return ToolResult(error=str(e))
+
+    fix_code_tool = Tool(
+        name="fix_code",
+        description="Fix code errors in a file using AI. Provide the file path and the error message (e.g., from test failures or syntax errors). The SDK will analyze the code and apply a fix.",
+        handler=fix_code_handler,
+        parameters={
+            "type": "object",
+            "properties": {
+                "repo_url": {
+                    "type": "string",
+                    "description": "The repository URL (must have been cloned first)"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Relative path to the file to fix (e.g., 'app/main.py')"
+                },
+                "error_message": {
+                    "type": "string",
+                    "description": "The error message or test failure output that needs to be fixed"
+                }
+            },
+            "required": ["repo_url", "file_path", "error_message"]
+        }
+    )
+
     return [
         rag_search_tool,
         clone_tool,
@@ -660,10 +804,105 @@ def create_tools() -> list[Tool]:
         apply_patches_tool,
         get_approvals_tool,
         run_tests_tool,
+        read_file_tool,
+        fix_code_tool,
         commit_changes_tool,
         push_branch_tool,
         create_pr_tool,
     ]
+
+
+def _fix_code_with_sdk(original_code: str, file_path: str, error_message: str) -> Optional[str]:
+    """
+    Call Copilot SDK to fix code based on an error message.
+    
+    This is a sync wrapper that runs the async SDK call in a thread pool
+    to avoid blocking the event loop.
+    """
+    import concurrent.futures
+    
+    async def _async_fix():
+        from copilot import CopilotClient
+        
+        client = CopilotClient()
+        await client.start()
+        
+        try:
+            model = os.getenv("COPILOT_MODEL", "gpt-4o")
+            
+            session = await client.create_session({
+                "model": model,
+                "system_message": {"content": "You are a code fixer. Output ONLY the complete fixed code, no explanations."},
+            })
+            
+            prompt = f"""Fix this Python code based on the error.
+
+## File: {file_path}
+
+## Error Message
+```
+{error_message}
+```
+
+## Current Code
+```python
+{original_code}
+```
+
+## Instructions
+1. Analyze the error message carefully
+2. Identify the root cause
+3. Output the COMPLETE fixed file (not just the changed parts)
+4. Do not include any explanations, only the code
+
+Output the fixed code:
+```python
+"""
+            
+            response_text = ""
+            done_event = asyncio.Event()
+            
+            def on_event(event):
+                nonlocal response_text
+                event_type = event.type.value if hasattr(event.type, 'value') else str(event.type)
+                
+                if event_type == "assistant.message":
+                    if hasattr(event.data, 'content') and event.data.content:
+                        response_text += event.data.content
+                elif event_type == "session.idle":
+                    done_event.set()
+                elif event_type in ("error", "session.error"):
+                    done_event.set()
+            
+            session.on(on_event)
+            await session.send({"prompt": prompt})
+            
+            try:
+                await asyncio.wait_for(done_event.wait(), timeout=60.0)
+            except asyncio.TimeoutError:
+                pass
+            
+            await session.destroy()
+            
+            # Extract code from response
+            if response_text:
+                # Look for code block
+                match = re.search(r'```(?:python)?\n(.*?)```', response_text, re.DOTALL)
+                if match:
+                    return match.group(1).strip()
+                # Or just return raw if it looks like code
+                if "def " in response_text or "import " in response_text:
+                    return response_text.strip()
+            
+            return None
+            
+        finally:
+            await client.stop()
+    
+    # Run in thread pool to get fresh event loop
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(asyncio.run, _async_fix())
+        return future.result(timeout=90.0)
 
 
 # =============================================================================
