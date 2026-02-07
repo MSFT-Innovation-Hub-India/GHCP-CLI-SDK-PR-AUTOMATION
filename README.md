@@ -19,6 +19,109 @@ This demo showcases a Python-based compliance agent that automatically enforces 
 
 ---
 
+## 🔄 How the Agent Works (Complete Workflow)
+
+Understanding when each step happens is critical. The agent works in **three phases**:
+
+### Phase 1: Discovery & Analysis (BEFORE any code changes)
+
+| Step | Tool | What Happens |
+|------|------|--------------|
+| 1 | `rag_search` | Search knowledge base for policy requirements (health endpoints, logging, security) |
+| 2 | `clone_repository` | Clone the target repo to local workspace |
+| 3 | `detect_compliance_drift` | **Scan ORIGINAL code** - check if `/healthz`, `/readyz`, structlog, middleware exist |
+| 4 | `security_scan` | **Scan ORIGINAL requirements.txt** via Security MCP server for CVE vulnerabilities |
+
+**At this point: No code has been changed. We've only analyzed what's wrong.**
+
+### Phase 2: Code Modification (MAKING changes)
+
+| Step | Tool | What Happens |
+|------|------|--------------|
+| 5 | `create_branch` | Create feature branch `chore/fleet-compliance-{timestamp}` |
+| 6 | `apply_compliance_patches` | **NOW code is modified** using Copilot SDK |
+| | | → Creates: `middleware.py`, `logging_config.py`, `tests/test_health.py` |
+| | | → Modifies: `main.py` (adds endpoints), `requirements.txt` (adds structlog) |
+| | | → Returns list of modified files |
+
+### Phase 3: Validation & Approval (AFTER code changes)
+
+| Step | Tool | What Happens |
+|------|------|--------------|
+| 7 | `get_required_approvals` | **Send MODIFIED file list** to Change Mgmt MCP to determine approvers |
+| 8 | `run_tests` | **Run pytest on MODIFIED code** to validate changes |
+| 8a | `read_file` + `fix_code` | If tests fail → examine code, apply fix, retry (max 3 times) |
+| 9 | `commit_changes` | Commit all modifications |
+| 10 | `push_branch` | Push branch to GitHub |
+| 11 | `create_pull_request` | Open PR with policy evidence, vulnerability report, approval labels |
+
+### Visual Timeline
+
+```
+ORIGINAL CODE                              MODIFIED CODE
+     │                                          │
+     ▼                                          ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  clone → detect_drift → security_scan    │   apply_patches → run_tests  │
+│         (analyze original)               │   (modify & validate)        │
+│                                          │                              │
+│  ◄────── BEFORE changes ──────►          │  ◄────── AFTER changes ─────►│
+└──────────────────────────────────────────────────────────────────────────┘
+                                       ▲
+                                       │
+                                 Branch created
+                                 Code modified here
+```
+
+### Key Clarifications
+
+| Question | Answer |
+|----------|--------|
+| When is drift detected? | **BEFORE** changes - on the original repo code |
+| When is security scan done? | **BEFORE** changes - on original requirements.txt |
+| When are approvals determined? | **AFTER** changes - based on which files were modified |
+| When are tests run? | **AFTER** changes - to validate the new code works |
+| What does the PR contain? | The diff between original and modified code |
+
+### Concrete Example: contoso-payments-api
+
+```
+Steps 1-2: Clone repo
+           Original state: basic FastAPI, no /healthz, no structlog, requests==2.19.0
+
+Step 3:    detect_compliance_drift on ORIGINAL code
+           → "Missing: /healthz, /readyz, structlog, middleware"
+
+Step 4:    security_scan on ORIGINAL requirements.txt
+           → "Found CVE-2018-18074 in requests==2.19.0" (vulnerability reported, NOT auto-fixed)
+
+Step 5:    create_branch "chore/fleet-compliance-xxx"
+
+Step 6:    apply_compliance_patches MODIFIES the code
+           → Creates middleware.py, logging_config.py
+           → Adds endpoints to main.py
+           → Adds structlog to requirements.txt
+           → Returns: ["app/main.py", "app/middleware.py", "app/logging_config.py", 
+                       "requirements.txt", "tests/test_health.py"]
+
+Step 7:    get_required_approvals with THOSE MODIFIED FILES
+           → "payments" in service name → requires SRE-Prod approval
+           → Returns: required_approvals=["SRE-Prod"], risk_level="high"
+
+Step 8:    run_tests on MODIFIED code
+           → pytest validates /healthz, /readyz endpoints work
+
+Steps 9-11: commit → push → create PR
+           PR description includes:
+           - Compliance drift that was detected (from step 3)
+           - Vulnerabilities found (from step 4) - reported but NOT auto-fixed
+           - Files changed (from step 6)
+           - Required approvers as labels (from step 7)
+           - Test results (from step 8)
+```
+
+---
+
 ## ⚡ Getting Started (Windows)
 
 > **Important:** These instructions are for **Windows** machines. Commands use PowerShell syntax.
