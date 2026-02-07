@@ -595,9 +595,31 @@ async def apply_async(repo: Path, service_name: str, drift: Optional[Drift] = No
     
     Returns:
         List of file paths that were modified (relative to repo root)
+    
+    Raises:
+        ValueError: If repo path is outside the allowed workspaces directory
     """
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+    
+    # SAFETY CHECK: Only allow patching within agent/workspaces directory
+    # This prevents accidental patching of the project's own code (ui/, mcp/, etc.)
+    agent_dir = Path(__file__).resolve().parents[1]
+    workspaces_dir = agent_dir / "workspaces"
+    repo_resolved = repo.resolve()
+    
+    # Check if repo is within workspaces directory
+    try:
+        repo_resolved.relative_to(workspaces_dir)
+    except ValueError:
+        # repo is NOT inside workspaces - this is a safety violation
+        error_msg = (
+            f"SAFETY: Refusing to patch '{repo_resolved}' - "
+            f"only repositories cloned to '{workspaces_dir}' can be patched. "
+            f"This prevents accidental modification of the project's own code."
+        )
+        print(f"   [PATCHER] ❌ {error_msg}", flush=True)
+        raise ValueError(error_msg)
     
     # Detect drift if not provided (this also discovers structure)
     if drift is None:
@@ -685,36 +707,41 @@ async def apply_async(repo: Path, service_name: str, drift: Optional[Drift] = No
             print(f"   [PATCHER] Parsing SDK response ({len(response_text)} chars)...", flush=True)
             files = _extract_code_blocks(response_text, drift)
             
-            # Backup original files for rollback
-            backups: dict[str, str] = {}
-            for rel_path in files:
-                original_path = repo / rel_path
-                if original_path.exists():
-                    backups[rel_path] = original_path.read_text(encoding="utf-8")
-            
-            # Validate all files BEFORE writing any
-            validation_errors = []
-            for rel_path, content in files.items():
-                if rel_path.endswith(".py"):
-                    valid, error = _validate_python_syntax(content, rel_path)
-                    if not valid:
-                        validation_errors.append(error)
-            
-            if validation_errors:
-                print(f"   [PATCHER] ⚠️  SDK generated invalid code:", flush=True)
-                for err in validation_errors:
-                    print(f"      {err}", flush=True)
-                print(f"   [PATCHER] Falling back to templates...", flush=True)
+            # Check if we got any parseable files
+            if not files:
+                print(f"   [PATCHER] ⚠️  Could not parse code blocks from SDK response, falling back to templates...", flush=True)
                 touched = _apply_fallback_templates(repo, service_name, drift)
             else:
-                # All files valid - write them
+                # Backup original files for rollback
+                backups: dict[str, str] = {}
+                for rel_path in files:
+                    original_path = repo / rel_path
+                    if original_path.exists():
+                        backups[rel_path] = original_path.read_text(encoding="utf-8")
+                
+                # Validate all files BEFORE writing any
+                validation_errors = []
                 for rel_path, content in files.items():
-                    success, error = _validate_and_write_file(repo, rel_path, content, validate_syntax=False)
-                    if success:
-                        touched.append(rel_path)
-                        print(f"   [PATCHER] ✓ Wrote: {rel_path}", flush=True)
-                    else:
-                        print(f"   [PATCHER] ✗ Failed to write {rel_path}: {error}", flush=True)
+                    if rel_path.endswith(".py"):
+                        valid, error = _validate_python_syntax(content, rel_path)
+                        if not valid:
+                            validation_errors.append(error)
+                
+                if validation_errors:
+                    print(f"   [PATCHER] ⚠️  SDK generated invalid code:", flush=True)
+                    for err in validation_errors:
+                        print(f"      {err}", flush=True)
+                    print(f"   [PATCHER] Falling back to templates...", flush=True)
+                    touched = _apply_fallback_templates(repo, service_name, drift)
+                else:
+                    # All files valid - write them
+                    for rel_path, content in files.items():
+                        success, error = _validate_and_write_file(repo, rel_path, content, validate_syntax=False)
+                        if success:
+                            touched.append(rel_path)
+                            print(f"   [PATCHER] ✓ Wrote: {rel_path}", flush=True)
+                        else:
+                            print(f"   [PATCHER] ✗ Failed to write {rel_path}: {error}", flush=True)
         else:
             print(f"   [PATCHER] No response from SDK, falling back to templates", flush=True)
             touched = _apply_fallback_templates(repo, service_name, drift)
@@ -804,7 +831,9 @@ def _apply_fallback_templates(repo: Path, service_name: str, drift: Drift) -> li
     if drift.missing_structlog:
         lc = repo / logging_rel
         if not lc.exists():
-            lc.write_text(_logging_py(service_name), encoding="utf-8")
+            # Compute middleware import path based on app structure
+            middleware_import_path = f"{app_dir_str.replace('/', '.')}.middleware" if app_dir_str else "middleware"
+            lc.write_text(_logging_py(service_name, middleware_import_path), encoding="utf-8")
             touched.append(logging_rel)
 
     # Update main app file
@@ -940,11 +969,11 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 '''
 
 
-def _logging_py(service_name: str) -> str:
+def _logging_py(service_name: str, middleware_import_path: str = "app.middleware") -> str:
     """Generate the logging configuration source code (fallback template)."""
     return f'''import logging
 import structlog
-from app.middleware import get_trace_id, get_request_id
+from {middleware_import_path} import get_trace_id, get_request_id
 
 class _ContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:

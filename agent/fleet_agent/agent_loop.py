@@ -421,7 +421,15 @@ def create_tools() -> list[Tool]:
         """Create a feature branch."""
         args = _get_args(invocation)
         repo_url = args.get("repo_url", "")
-        branch_name = args.get("branch_name", f"chore/fleet-compliance-{time.time_ns()}")
+        
+        # Always generate unique branch name with timestamp to avoid conflicts
+        # Even if agent provides a name, we append uniqueness to prevent "PR already exists"
+        base_name = args.get("branch_name", "chore/fleet-compliance")
+        # Strip any existing timestamp suffix to normalize
+        if base_name.startswith("chore/fleet-compliance"):
+            base_name = "chore/fleet-compliance"
+        # Add unique suffix (nanoseconds ensures uniqueness even in rapid succession)
+        branch_name = f"{base_name}-{time.time_ns()}"
         
         ws = _workspace_registry.get(repo_url)
         if not ws:
