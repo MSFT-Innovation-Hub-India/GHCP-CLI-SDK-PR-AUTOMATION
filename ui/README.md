@@ -7,7 +7,7 @@ React + FastAPI visual frontend for demonstrating the Fleet Compliance Agent.
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ React Frontend (localhost:3000)                                 │
-│ • Multi-panel layout with Tailwind CSS                         │
+│ • Multi-panel layout with Tailwind CSS                          │
 │ • Real-time streaming via WebSocket                             │
 │ • Single repo dropdown selector for demos                       │
 │ • Markdown rendering with remark-gfm                            │
@@ -91,7 +91,7 @@ cd ui/backend
 ```powershell
 cd ui/frontend
 npm install
-npm run dev -- --port 3001
+npm run dev
 ```
 
 ## UI Layout
