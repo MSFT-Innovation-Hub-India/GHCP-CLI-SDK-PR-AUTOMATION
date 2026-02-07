@@ -48,6 +48,9 @@ WORKSPACES.mkdir(parents=True, exist_ok=True)
 # File-based PR tracking (more reliable than module-level state)
 PR_LOG_FILE = ROOT / "created_prs.json"
 
+# File-based modified files tracking (SDK events don't expose tool results)
+MODIFIED_FILES_LOG = ROOT / "modified_files.json"
+
 # Global state for tracking workspaces across tool calls
 _workspace_registry: dict[str, Path] = {}
 
@@ -79,6 +82,42 @@ def get_created_prs() -> list[dict]:
 
 def clear_created_prs():
     """Clear the PR log file."""
+    if PR_LOG_FILE.exists():
+        PR_LOG_FILE.unlink()
+
+
+def log_modified_files(repo_url: str, files: list[str]):
+    """Log modified files for the UI backend to read."""
+    import json
+    data = {}
+    if MODIFIED_FILES_LOG.exists():
+        try:
+            data = json.loads(MODIFIED_FILES_LOG.read_text())
+        except:
+            data = {}
+    data[repo_url] = files
+    MODIFIED_FILES_LOG.write_text(json.dumps(data))
+    print(f"[MODIFIED_FILES] Logged {len(files)} files for {repo_url}", flush=True)
+
+
+def get_modified_files(repo_url: str = None) -> dict | list:
+    """Get modified files from log. If repo_url provided, return list for that repo."""
+    import json
+    if not MODIFIED_FILES_LOG.exists():
+        return [] if repo_url else {}
+    try:
+        data = json.loads(MODIFIED_FILES_LOG.read_text())
+        if repo_url:
+            return data.get(repo_url, [])
+        return data
+    except:
+        return [] if repo_url else {}
+
+
+def clear_modified_files():
+    """Clear the modified files log."""
+    if MODIFIED_FILES_LOG.exists():
+        MODIFIED_FILES_LOG.unlink()
     if PR_LOG_FILE.exists():
         PR_LOG_FILE.unlink()
 
@@ -348,6 +387,9 @@ def create_tools() -> list[Tool]:
         try:
             repo_name = _repo_name(repo_url)
             touched = apply_patches_impl(ws, repo_name)
+            
+            # Log modified files for UI to read (SDK events don't expose tool results)
+            log_modified_files(repo_url, touched)
             
             return ToolResult(textResultForLlm=json.dumps({
                 "success": True,

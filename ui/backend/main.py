@@ -231,14 +231,15 @@ class AgentEventEmitter:
     
     async def run_agent(self, repos: list[str]):
         """Run the agent with event streaming."""
-        from fleet_agent.agent_loop import create_tools, SYSTEM_PROMPT, WORKSPACES, _workspace_registry, get_created_prs, clear_created_prs
+        from fleet_agent.agent_loop import create_tools, SYSTEM_PROMPT, WORKSPACES, _workspace_registry, get_created_prs, clear_created_prs, clear_modified_files
         from fleet_agent.github_ops import gh_auth_status
         from copilot import CopilotClient
         from copilot.types import Tool, ToolResult
         import re
         
-        # Clear any previous PR tracking (file-based)
+        # Clear any previous tracking (file-based logs)
         clear_created_prs()
+        clear_modified_files()
         
         # Emit start
         await self.emit(WSEvent(
@@ -430,31 +431,17 @@ Process all repositories completely."""
                     # Build completion event data
                     complete_data = {"tool": tool_name, "repo": self.current_repo}
                     
-                    # Extract tool result for specific tools that return useful data
-                    if tool_name in ("apply_compliance_patches", "detect_compliance_drift", "security_scan"):
-                        tool_content = None
-                        for attr_name in ['content', 'result', 'tool_result', 'text_result', 'output', 
-                                          'textResultForLlm', 'text_result_for_llm', 'response', 'data']:
-                            val = getattr(event.data, attr_name, None)
-                            if val:
-                                tool_content = val
-                                break
-                        
-                        if tool_content:
-                            try:
-                                import json as json_mod
-                                if isinstance(tool_content, str):
-                                    result_data = json_mod.loads(tool_content)
-                                else:
-                                    result_data = tool_content
-                                
-                                if isinstance(result_data, dict):
-                                    # For apply_compliance_patches, include modified_files
-                                    if tool_name == "apply_compliance_patches" and "modified_files" in result_data:
-                                        complete_data["modified_files"] = result_data["modified_files"]
-                                        print(f"[SDK] apply_compliance_patches modified: {result_data['modified_files']}", flush=True)
-                            except Exception as e:
-                                print(f"[SDK] Could not parse tool result: {e}", flush=True)
+                    # For apply_compliance_patches, read modified files from file-based log
+                    # (SDK events don't expose tool return values)
+                    if tool_name == "apply_compliance_patches" and self.current_repo:
+                        try:
+                            from fleet_agent.agent_loop import get_modified_files
+                            modified = get_modified_files(self.current_repo)
+                            if modified:
+                                complete_data["modified_files"] = modified
+                                print(f"[SDK] apply_compliance_patches modified (from file): {modified}", flush=True)
+                        except Exception as e:
+                            print(f"[SDK] Could not read modified files: {e}", flush=True)
                     
                     emit_now(self.emit(WSEvent(type=EventType.TOOL_CALL_COMPLETE, data=complete_data)))
                     

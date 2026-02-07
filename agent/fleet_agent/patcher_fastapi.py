@@ -532,47 +532,55 @@ def _extract_code_blocks(response_text: str, drift: Drift) -> dict[str, str]:
     middleware_path = f"{app_dir}/middleware.py" if app_dir else "middleware.py"
     logging_path = f"{app_dir}/logging_config.py" if app_dir else "logging_config.py"
     
-    # Build patterns dynamically based on discovered structure
-    patterns = []
+    # Normalize response text: convert Windows paths to forward slashes
+    normalized_text = response_text.replace("\\", "/")
+    
+    # Build patterns dynamically - made more flexible to handle format variations
+    # Patterns now handle: "### UPDATED file", "### Updated: file", "**file**", etc.
+    file_patterns = []
     
     if structure.app_file:
-        # Escape special regex characters in path
-        escaped_app = re.escape(structure.app_file)
-        patterns.append((
-            rf"###\s*UPDATED\s+{escaped_app}\s*\n```(?:python)?\n(.*?)```",
-            structure.app_file
-        ))
+        # Normalize the app file path too
+        norm_app = structure.app_file.replace("\\", "/")
+        file_patterns.append((norm_app, ["UPDATED", "UPDATE", "Modified"]))
     
-    req_file = structure.requirements_file or "requirements.txt"
-    escaped_req = re.escape(req_file)
-    patterns.append((
-        rf"###\s*UPDATED\s+{escaped_req}\s*\n```(?:\w*)?\n(.*?)```",
-        req_file
-    ))
+    req_file = (structure.requirements_file or "requirements.txt").replace("\\", "/")
+    file_patterns.append((req_file, ["UPDATED", "UPDATE", "Modified"]))
     
-    escaped_mw = re.escape(middleware_path)
-    patterns.append((
-        rf"###\s*NEW\s+{escaped_mw}\s*\n```(?:python)?\n(.*?)```",
-        middleware_path
-    ))
+    norm_mw = middleware_path.replace("\\", "/")
+    file_patterns.append((norm_mw, ["NEW", "CREATE", "CREATED", "Add"]))
     
-    escaped_log = re.escape(logging_path)
-    patterns.append((
-        rf"###\s*NEW\s+{escaped_log}\s*\n```(?:python)?\n(.*?)```",
-        logging_path
-    ))
+    norm_log = logging_path.replace("\\", "/")
+    file_patterns.append((norm_log, ["NEW", "CREATE", "CREATED", "Add"]))
     
-    patterns.append((
-        r"###\s*NEW\s+tests/test_health\.py\s*\n```(?:python)?\n(.*?)```",
-        "tests/test_health.py"
-    ))
+    file_patterns.append(("tests/test_health.py", ["NEW", "CREATE", "CREATED", "Add"]))
     
-    for pattern, filename in patterns:
-        match = re.search(pattern, response_text, re.DOTALL | re.IGNORECASE)
-        if match:
-            content = match.group(1).strip()
-            if content:
-                files[filename] = content
+    for filename, keywords in file_patterns:
+        # Try multiple pattern variations
+        escaped_file = re.escape(filename)
+        
+        for keyword in keywords:
+            # Pattern 1: ### KEYWORD filename\n```python\n...\n```
+            pattern = rf"###?\s*{keyword}[:\s]+{escaped_file}\s*\n```(?:python)?\n(.*?)```"
+            match = re.search(pattern, normalized_text, re.DOTALL | re.IGNORECASE)
+            if match:
+                content = match.group(1).strip()
+                if content and len(content) > 10:
+                    # Use original filename (with backslashes if on Windows)
+                    files[filename] = content
+                    print(f"   [PATCHER] Extracted: {filename} ({len(content)} chars)", flush=True)
+                    break
+        
+        # If still not found, try a more generic pattern: **filename** or `filename` followed by code block
+        if filename not in files:
+            # Pattern: filename (any format) followed by code block
+            simple_pattern = rf"(?:\*\*|`)?{escaped_file}(?:\*\*|`)?[:\s]*\n```(?:python)?\n(.*?)```"
+            match = re.search(simple_pattern, normalized_text, re.DOTALL | re.IGNORECASE)
+            if match:
+                content = match.group(1).strip()
+                if content and len(content) > 10:
+                    files[filename] = content
+                    print(f"   [PATCHER] Extracted (simple): {filename} ({len(content)} chars)", flush=True)
     
     return files
 
@@ -696,15 +704,17 @@ async def apply_async(repo: Path, service_name: str, drift: Optional[Drift] = No
         await session.send({"prompt": prompt})
         
         try:
-            await asyncio.wait_for(done_event.wait(), timeout=120.0)
+            await asyncio.wait_for(done_event.wait(), timeout=60.0)
         except asyncio.TimeoutError:
-            print(f"   [PATCHER] SDK timeout", flush=True)
+            print(f"   [PATCHER] SDK timeout (60s)", flush=True)
         
         await session.destroy()
         
         # Extract and write files with validation
         if response_text:
             print(f"   [PATCHER] Parsing SDK response ({len(response_text)} chars)...", flush=True)
+            # Debug: print first 500 chars to see format
+            print(f"   [PATCHER] SDK response preview:\n{response_text[:800]}...", flush=True)
             files = _extract_code_blocks(response_text, drift)
             
             # Check if we got any parseable files
