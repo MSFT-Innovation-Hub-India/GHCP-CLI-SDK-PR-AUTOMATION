@@ -185,6 +185,7 @@ export default function App() {
   const [prsCreated, setPrsCreated] = useState<string[]>([])
   const [isInitializing, setIsInitializing] = useState(true)
   const [initStatus, setInitStatus] = useState('Connecting to backend...')
+  const [wsConnected, setWsConnected] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
@@ -462,6 +463,7 @@ export default function App() {
     ws.onopen = () => {
       console.log('[WS] Connected!')
       isClosingRef.current = false
+      setWsConnected(true)
       ws.send(JSON.stringify({ action: 'status' }))
     }
     
@@ -473,6 +475,7 @@ export default function App() {
     
     ws.onclose = () => {
       console.log('[WS] Disconnected')
+      setWsConnected(false)
       if (!isClosingRef.current) {
         console.log('[WS] Will reconnect in 2s...')
         reconnectTimeoutRef.current = window.setTimeout(connectWS, 2000)
@@ -671,9 +674,9 @@ export default function App() {
 
               <button
                 onClick={startAgent}
-                disabled={!allSystemsReady || isRunning || !selectedRepo}
+                disabled={!allSystemsReady || isRunning || !selectedRepo || !wsConnected}
                 className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all ${
-                  allSystemsReady && !isRunning && selectedRepo
+                  allSystemsReady && !isRunning && selectedRepo && wsConnected
                     ? 'bg-copilot-600 hover:bg-copilot-700 text-white'
                     : 'bg-gray-700 text-gray-500 cursor-not-allowed'
                 }`}
@@ -682,6 +685,11 @@ export default function App() {
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
                     Running...
+                  </>
+                ) : !wsConnected ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Connecting...
                   </>
                 ) : (
                   <>
