@@ -50,6 +50,7 @@ interface ToolCall {
   timestamp: string
   status: 'running' | 'complete'
   callNumber?: number
+  modifiedFiles?: string[]  // Files modified by apply_compliance_patches
 }
 
 interface LogEntry {
@@ -151,6 +152,18 @@ function ToolCallDisplay({ toolCall }: { toolCall: ToolCall }) {
         <div className="text-xs text-gray-500 truncate" title={JSON.stringify(toolCall.args)}>
           {JSON.stringify(toolCall.args).substring(0, 80)}...
         </div>
+        {/* Show modified files for apply_compliance_patches */}
+        {toolCall.modifiedFiles && toolCall.modifiedFiles.length > 0 && (
+          <div className="mt-1 ml-2 text-xs text-green-400">
+            {toolCall.modifiedFiles.map((file, i) => (
+              <div key={i} className="flex items-center gap-1">
+                <span className="text-gray-600">└─</span>
+                <FileCode className="w-3 h-3" />
+                <span>{file}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -321,7 +334,15 @@ export default function App() {
             const matches = data.data.call_number
               ? tc.callNumber === data.data.call_number
               : tc.tool === data.data.tool && tc.status === 'running'
-            return matches ? { ...tc, status: 'complete' as const } : tc
+            if (matches) {
+              const updated: ToolCall = { ...tc, status: 'complete' as const }
+              // Capture modified files for apply_compliance_patches
+              if (data.data.modified_files) {
+                updated.modifiedFiles = data.data.modified_files as string[]
+              }
+              return updated
+            }
+            return tc
           })
         )
         break

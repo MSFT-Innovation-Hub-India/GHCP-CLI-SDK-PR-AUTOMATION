@@ -427,7 +427,36 @@ Process all repositories completely."""
                         )
                     print(f"[SDK] Tool complete: {tool_name} (call_id={call_id})", flush=True)
                     
-                    emit_now(self.emit(WSEvent(type=EventType.TOOL_CALL_COMPLETE, data={"tool": tool_name, "repo": self.current_repo})))
+                    # Build completion event data
+                    complete_data = {"tool": tool_name, "repo": self.current_repo}
+                    
+                    # Extract tool result for specific tools that return useful data
+                    if tool_name in ("apply_compliance_patches", "detect_compliance_drift", "security_scan"):
+                        tool_content = None
+                        for attr_name in ['content', 'result', 'tool_result', 'text_result', 'output', 
+                                          'textResultForLlm', 'text_result_for_llm', 'response', 'data']:
+                            val = getattr(event.data, attr_name, None)
+                            if val:
+                                tool_content = val
+                                break
+                        
+                        if tool_content:
+                            try:
+                                import json as json_mod
+                                if isinstance(tool_content, str):
+                                    result_data = json_mod.loads(tool_content)
+                                else:
+                                    result_data = tool_content
+                                
+                                if isinstance(result_data, dict):
+                                    # For apply_compliance_patches, include modified_files
+                                    if tool_name == "apply_compliance_patches" and "modified_files" in result_data:
+                                        complete_data["modified_files"] = result_data["modified_files"]
+                                        print(f"[SDK] apply_compliance_patches modified: {result_data['modified_files']}", flush=True)
+                            except Exception as e:
+                                print(f"[SDK] Could not parse tool result: {e}", flush=True)
+                    
+                    emit_now(self.emit(WSEvent(type=EventType.TOOL_CALL_COMPLETE, data=complete_data)))
                     
                     # Remove from long-running tracking
                     long_running_tools.discard(tool_name)
