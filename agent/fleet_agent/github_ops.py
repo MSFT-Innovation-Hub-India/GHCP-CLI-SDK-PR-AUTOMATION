@@ -85,9 +85,108 @@ def checkout_branch(repo: Path, branch: str) -> None:
     """
     _run(["git", "checkout", "-b", branch], cwd=repo)
 
+# Standard Python gitignore patterns to exclude from commits
+PYTHON_GITIGNORE_PATTERNS = """
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+"""
+
+
+def ensure_gitignore(repo: Path) -> bool:
+    """
+    Ensure the repository has a .gitignore with Python patterns.
+    
+    If .gitignore doesn't exist, creates one with standard Python patterns.
+    If it exists but lacks key patterns, appends them.
+    
+    Args:
+        repo: Path to the repository working directory
+    
+    Returns:
+        True if .gitignore was created or modified, False if already sufficient
+    """
+    gitignore_path = repo / ".gitignore"
+    existing_content = ""
+    
+    if gitignore_path.exists():
+        existing_content = gitignore_path.read_text(encoding="utf-8")
+        # Check if essential patterns already exist
+        if "__pycache__" in existing_content and "*.pyc" in existing_content:
+            return False  # Already has Python patterns
+    
+    # Append patterns (or create new file)
+    patterns_to_add = []
+    for line in PYTHON_GITIGNORE_PATTERNS.strip().split("\n"):
+        line = line.strip()
+        if line and not line.startswith("#") and line not in existing_content:
+            patterns_to_add.append(line)
+    
+    if not patterns_to_add and existing_content:
+        return False  # Nothing to add
+    
+    # Write the gitignore
+    if existing_content:
+        # Append to existing
+        new_content = existing_content.rstrip() + "\n\n# Added by Fleet Compliance Agent\n"
+        new_content += "\n".join(patterns_to_add) + "\n"
+    else:
+        # Create new
+        new_content = "# Python .gitignore (Fleet Compliance Agent)\n" + PYTHON_GITIGNORE_PATTERNS.strip() + "\n"
+    
+    gitignore_path.write_text(new_content, encoding="utf-8")
+    return True
+
+
 def commit_all(repo: Path, msg: str) -> bool:
     """
     Stage all changes and commit with a message.
+    
+    Ensures proper .gitignore exists before staging to exclude
+    bytecode files (.pyc, __pycache__) and other generated files.
     
     Args:
         repo: Path to the repository working directory
@@ -99,6 +198,12 @@ def commit_all(repo: Path, msg: str) -> bool:
     Raises:
         RuntimeError: If commit fails for reasons other than empty changeset
     """
+    # Ensure .gitignore exists before staging
+    gitignore_added = ensure_gitignore(repo)
+    if gitignore_added:
+        # Stage the .gitignore first so it takes effect
+        _run(["git", "add", ".gitignore"], cwd=repo)
+    
     _run(["git", "add", "-A"], cwd=repo)
     try:
         _run(["git", "commit", "-m", msg], cwd=repo)
