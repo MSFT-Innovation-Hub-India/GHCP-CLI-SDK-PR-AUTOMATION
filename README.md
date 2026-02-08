@@ -6,6 +6,14 @@ This demo showcases a Python-based compliance agent that automatically enforces 
 
 ---
 
+## 🎬 Watch the Demo
+
+[![Fleet Compliance Agent Demo](https://img.youtube.com/vi/Oyv-tmG7q1k/maxresdefault.jpg)](https://youtu.be/Oyv-tmG7q1k)
+
+*Click the image above to watch the full demo video on YouTube*
+
+---
+
 ## 💡 Why GitHub Copilot SDK?
 
 **GitHub Copilot CLI** is typically used for interactive, natural language conversations - a developer types a question and gets a response. But what if you could harness that same AI capability **programmatically**?
