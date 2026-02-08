@@ -2,15 +2,15 @@
 
 **Demonstrating GitHub Copilot CLI/SDK Integration for Enterprise Fleet Management**
 
-This demo showcases a Python-based compliance agent that automatically enforces organizational policies across a fleet of microservices using GitHub Copilot [CLI SDK](https://github.com/github/copilot-sdk) capabilities.
+This demo showcases a Python-based compliance agent that automatically enforces organizational policies across a fleet of microservices using GitHub Copilot [SDK](https://github.com/github/copilot-sdk) capabilities.
 
 ---
 
-## 💡 Why GitHub Copilot CLI SDK?
+## 💡 Why GitHub Copilot SDK?
 
 **GitHub Copilot CLI** is typically used for interactive, natural language conversations - a developer types a question and gets a response. But what if you could harness that same AI capability **programmatically**?
 
-The **GitHub Copilot CLI SDK** unlocks exactly this. By exposing the Copilot CLI through a Python SDK, it transforms from a conversational tool into a **programmable agent brain**.
+The **GitHub Copilot SDK** unlocks exactly this. By exposing the Copilot CLI through a Python SDK, it transforms from a conversational tool into a **programmable agent brain**.
 
 **How It Works:** The Python SDK spawns the Copilot CLI in **server mode** and communicates via **JSON-RPC**. Your code registers tools, sends prompts, and receives events - while the CLI handles authentication, model communication, and token management.
 
