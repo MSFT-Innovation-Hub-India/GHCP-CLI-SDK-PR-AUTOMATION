@@ -41,6 +41,8 @@ await session.send({"prompt": "Enforce compliance on contoso-payments-api"})
 
 This pattern enables **enterprise automation scenarios** that would be impossible with interactive CLI usage alone.
 
+> **🔑 Interactive vs. Embedded:** Developers typically use GitHub Copilot CLI or Agent Mode in VS Code **interactively** - asking questions, getting suggestions, and iterating in real-time. In this sample, we take a fundamentally different approach: **we embed the GitHub Copilot SDK directly into an autonomous agent**. The SDK becomes the reasoning engine for a fully automated workflow, not an interactive assistant.
+
 > **⚠️ Preview SDK Notice:** The GitHub Copilot SDK is currently in **preview**. This demo uses version `github-copilot-sdk>=0.1.21`.
 
 ---
@@ -48,6 +50,8 @@ This pattern enables **enterprise automation scenarios** that would be impossibl
 ## 🎯 What This Demo Implements
 
 This demo implements **automated fleet-wide compliance enforcement** - an AI agent that audits multiple microservices, detects policy violations, applies fixes, and creates Pull Requests with evidence.
+
+> **💡 Production vs. Demo Mode:** In a production scenario, this agent would run **headlessly** - processing repositories one after another without any user interface, triggered by a schedule or event. This sample includes a **React-based GUI** to help you visualize and understand how embedding the GitHub Copilot SDK as an autonomous agent works. The GUI provides real-time visibility into the agent's reasoning and tool execution. Note that **human-in-the-loop would still be required** when reviewing and approving the Pull Requests created by the agent - the automation proposes, humans approve.
 
 ### SDK & AI Capabilities
 
