@@ -224,16 +224,16 @@ def discover_fastapi_structure(repo: Path) -> FastAPIStructure:
     # Scan all Python files
     py_files = list(repo.rglob("*.py"))
     
-    # Skip common non-source directories and project infrastructure
+    # Skip common non-source directories
     skip_dirs = {
         ".venv", "venv", "__pycache__", ".git", "node_modules",
         ".tox", "dist", "build",
-        # Prevent scanning host project directories that aren't target repos
-        "ui", "mcp", "scripts", "agent", "knowledge", "docs", "images",
     }
+    # Filter using path parts RELATIVE to repo root (not absolute path)
+    # to avoid false positives from parent directory names
     py_files = [
         f for f in py_files 
-        if not any(skip in f.parts for skip in skip_dirs)
+        if not any(skip in f.relative_to(repo).parts for skip in skip_dirs)
     ]
     
     for py_file in py_files:
@@ -696,6 +696,7 @@ async def apply_async(repo: Path, service_name: str, drift: Optional[Drift] = No
         session = await client.create_session({
             "model": model,
             "system_message": {"content": "You are a code transformation assistant. Output only code, no explanations."},
+            "available_tools": [],  # Prevent SDK built-in tools from writing files to CWD
         })
         
         # Collect response

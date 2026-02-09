@@ -883,6 +883,7 @@ def _fix_code_with_sdk(original_code: str, file_path: str, error_message: str) -
             session = await client.create_session({
                 "model": model,
                 "system_message": {"content": "You are a code fixer. Output ONLY the complete fixed code, no explanations."},
+                "available_tools": [],  # Prevent SDK built-in tools from writing files to CWD
             })
             
             prompt = f"""Fix this Python code based on the error.
