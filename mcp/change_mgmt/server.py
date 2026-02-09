@@ -4,20 +4,25 @@ Change Management MCP Server
 Provides approval matrix evaluation for fleet compliance PRs.
 Implements CM-7 Change Management Approval Matrix policy.
 
-Endpoints:
-    POST /approval - Evaluate required approvals for a change
-    POST /risk-assessment - Calculate change risk score
-    GET /healthz - Health check
-    GET /readyz - Readiness check
+Now uses the Model Context Protocol (MCP) via FastMCP + SSE transport.
+
+MCP Tools:
+    evaluate_approval  - Evaluate required approvals for a change
+    assess_risk        - Calculate change risk score
+
+Run:
+    python server.py                          # default port 4101
+    MCP_PORT=4101 python server.py            # explicit port
 """
 
 import logging
+import json
 import structlog
 from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+
+from mcp.server.fastmcp import FastMCP
 
 # Configure structured logging
 structlog.configure(
@@ -31,14 +36,13 @@ structlog.configure(
 )
 log = structlog.get_logger()
 
-app = FastAPI(
-    title="Change Management MCP Server",
-    description="Evaluates approval requirements based on CM-7 policy matrix",
-    version="1.0.0",
-)
+# Create the MCP server
+import os as _os
+_port = int(_os.getenv("MCP_PORT", "4101"))
+mcp = FastMCP("Change Management MCP Server", host="0.0.0.0", port=_port)
 
 # =============================================================================
-# MODELS
+# ENUMS
 # =============================================================================
 
 class ChangeType(str, Enum):
@@ -55,40 +59,6 @@ class RiskLevel(str, Enum):
     HIGH = "high"
     CRITICAL = "critical"
 
-class ApprovalReq(BaseModel):
-    """Request to evaluate required approvals for a change."""
-    service: str = Field(..., description="Service name (e.g., contoso-payments-api)")
-    touched_paths: List[str] = Field(default_factory=list, description="List of file paths modified")
-    change_type: Optional[ChangeType] = Field(default=ChangeType.COMPLIANCE, description="Type of change")
-    description: Optional[str] = Field(default="", description="Change description")
-
-class ApprovalResponse(BaseModel):
-    """Response containing required approvals and rationale."""
-    required_approvals: List[str]
-    rationale: str
-    risk_level: RiskLevel
-    auto_merge_allowed: bool
-    sla_hours: int
-    policies_referenced: List[str]
-    timestamp: str
-
-class RiskAssessmentReq(BaseModel):
-    """Request for risk assessment of a proposed change."""
-    service: str
-    touched_paths: List[str] = Field(default_factory=list)
-    lines_added: int = Field(default=0, ge=0)
-    lines_removed: int = Field(default=0, ge=0)
-    has_tests: bool = Field(default=True)
-    dependencies_changed: bool = Field(default=False)
-
-class RiskAssessmentResponse(BaseModel):
-    """Risk assessment result."""
-    risk_score: int = Field(..., ge=0, le=100)
-    risk_level: RiskLevel
-    risk_factors: List[str]
-    mitigations_recommended: List[str]
-    timestamp: str
-
 # =============================================================================
 # APPROVAL MATRIX CONFIGURATION (CM-7 Policy Implementation)
 # =============================================================================
@@ -100,7 +70,7 @@ HIGH_IMPACT_SERVICES = {
 
 # Sensitive file patterns requiring Security approval
 SECURITY_SENSITIVE_PATTERNS = [
-    "auth", "secret", "keyvault", "credential", "token", "key", 
+    "auth", "secret", "keyvault", "credential", "token", "key",
     "password", "cert", "ssl", "tls", "encrypt", "decrypt",
     "oauth", "saml", "jwt", "identity", "permission", "rbac"
 ]
@@ -153,7 +123,7 @@ def _calculate_risk_level(
     high_impact: bool,
     sensitive_files: bool,
     infra_touched: bool,
-    db_touched: bool
+    db_touched: bool,
 ) -> RiskLevel:
     """Calculate risk level based on change characteristics."""
     score = sum([
@@ -181,111 +151,136 @@ def _get_sla_hours(risk_level: RiskLevel) -> int:
     return sla_map[risk_level]
 
 # =============================================================================
-# ENDPOINTS
+# MCP TOOLS
 # =============================================================================
 
-@app.post("/approval", response_model=ApprovalResponse)
-def evaluate_approval(req: ApprovalReq) -> ApprovalResponse:
+@mcp.tool()
+def evaluate_approval(
+    service: str,
+    touched_paths: list[str] | None = None,
+    change_type: str = "compliance",
+    description: str = "",
+) -> str:
     """
     Evaluate required approvals for a change based on CM-7 policy.
-    
+
     Rules:
-    - High-impact services (payments/auth/billing) → SRE-Prod required
-    - Security-sensitive file patterns → Security team required
-    - Infrastructure changes → SRE-Prod required
-    - Database/migration changes → DBA review required
-    - Observability-only changes → ServiceOwner sufficient
+    - High-impact services (payments/auth/billing) -> SRE-Prod required
+    - Security-sensitive file patterns -> Security team required
+    - Infrastructure changes -> SRE-Prod required
+    - Database/migration changes -> DBA review required
+    - Observability-only changes -> ServiceOwner sufficient
+
+    Args:
+        service: Service name (e.g. contoso-payments-api)
+        touched_paths: List of file paths modified
+        change_type: Type of change (feature, bugfix, security_patch, observability, infrastructure, compliance)
+        description: Change description
     """
-    log.info("evaluating_approval", service=req.service, paths_count=len(req.touched_paths))
-    
-    high_impact = _is_high_impact_service(req.service)
-    sensitive_files = _touches_sensitive_files(req.touched_paths)
-    infra_touched = _touches_infrastructure(req.touched_paths)
-    db_touched = _touches_database(req.touched_paths)
-    
+    if touched_paths is None:
+        touched_paths = []
+
+    log.info("evaluating_approval", service=service, paths_count=len(touched_paths))
+
+    high_impact = _is_high_impact_service(service)
+    sensitive_files = _touches_sensitive_files(touched_paths)
+    infra_touched = _touches_infrastructure(touched_paths)
+    db_touched = _touches_database(touched_paths)
+
     required_approvals: List[str] = []
     policies_referenced: List[str] = ["CM-7"]
     rationale_parts: List[str] = []
-    
-    # Evaluate each dimension
+
     if high_impact:
         required_approvals.append("SRE-Prod")
         rationale_parts.append("High-impact service requires SRE oversight")
         policies_referenced.append("CM-7.2")
-    
+
     if sensitive_files:
         if "Security" not in required_approvals:
             required_approvals.append("Security")
         rationale_parts.append("Security-sensitive files require Security team review")
         policies_referenced.append("CM-7.3")
-    
+
     if infra_touched:
         if "SRE-Prod" not in required_approvals:
             required_approvals.append("SRE-Prod")
         rationale_parts.append("Infrastructure changes require SRE review")
         policies_referenced.append("CM-7.4")
-    
+
     if db_touched:
         required_approvals.append("DBA")
         rationale_parts.append("Database/schema changes require DBA review")
         policies_referenced.append("CM-7.5")
-    
-    # Default: ServiceOwner if no elevated approvals needed
+
     if not required_approvals:
         required_approvals.append("ServiceOwner")
         rationale_parts.append("Standard change with no elevated risk factors")
-    
+
     risk_level = _calculate_risk_level(high_impact, sensitive_files, infra_touched, db_touched)
-    
-    # Automation policy: agents may open PRs but NOT auto-merge to production
     auto_merge_allowed = risk_level == RiskLevel.LOW and not high_impact
-    
-    response = ApprovalResponse(
-        required_approvals=required_approvals,
-        rationale="; ".join(rationale_parts),
-        risk_level=risk_level,
-        auto_merge_allowed=auto_merge_allowed,
-        sla_hours=_get_sla_hours(risk_level),
-        policies_referenced=list(set(policies_referenced)),
-        timestamp=datetime.now(timezone.utc).isoformat(),
-    )
-    
+
+    response = {
+        "required_approvals": required_approvals,
+        "rationale": "; ".join(rationale_parts),
+        "risk_level": risk_level.value,
+        "auto_merge_allowed": auto_merge_allowed,
+        "sla_hours": _get_sla_hours(risk_level),
+        "policies_referenced": list(set(policies_referenced)),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
     log.info(
         "approval_evaluated",
-        service=req.service,
+        service=service,
         approvals=required_approvals,
         risk_level=risk_level.value,
     )
-    
-    return response
+
+    return json.dumps(response, indent=2)
 
 
-@app.post("/risk-assessment", response_model=RiskAssessmentResponse)
-def assess_risk(req: RiskAssessmentReq) -> RiskAssessmentResponse:
+@mcp.tool()
+def assess_risk(
+    service: str,
+    touched_paths: list[str] | None = None,
+    lines_added: int = 0,
+    lines_removed: int = 0,
+    has_tests: bool = True,
+    dependencies_changed: bool = False,
+) -> str:
     """
     Calculate detailed risk score for a proposed change.
     Used to prioritize review queue and set SLAs.
+
+    Args:
+        service: Service name
+        touched_paths: List of modified file paths
+        lines_added: Number of lines added
+        lines_removed: Number of lines removed
+        has_tests: Whether tests are included
+        dependencies_changed: Whether dependencies were modified
     """
-    log.info("assessing_risk", service=req.service)
-    
+    if touched_paths is None:
+        touched_paths = []
+
+    log.info("assessing_risk", service=service)
+
     risk_factors: List[str] = []
     mitigations: List[str] = []
     score = 0
-    
-    # Service criticality
-    if _is_high_impact_service(req.service):
+
+    if _is_high_impact_service(service):
         score += 25
         risk_factors.append("High-impact service")
         mitigations.append("Require canary deployment")
-    
-    # Sensitive files
-    if _touches_sensitive_files(req.touched_paths):
+
+    if _touches_sensitive_files(touched_paths):
         score += 25
         risk_factors.append("Security-sensitive files modified")
         mitigations.append("Security team review required")
-    
-    # Change size
-    total_lines = req.lines_added + req.lines_removed
+
+    total_lines = lines_added + lines_removed
     if total_lines > 500:
         score += 20
         risk_factors.append(f"Large change ({total_lines} lines)")
@@ -293,26 +288,22 @@ def assess_risk(req: RiskAssessmentReq) -> RiskAssessmentResponse:
     elif total_lines > 200:
         score += 10
         risk_factors.append(f"Medium change ({total_lines} lines)")
-    
-    # Test coverage
-    if not req.has_tests:
+
+    if not has_tests:
         score += 15
         risk_factors.append("No tests included")
         mitigations.append("Add unit tests before merge")
-    
-    # Dependencies
-    if req.dependencies_changed:
+
+    if dependencies_changed:
         score += 10
         risk_factors.append("Dependencies modified")
         mitigations.append("Run security scan on new dependencies")
-    
-    # Infrastructure
-    if _touches_infrastructure(req.touched_paths):
+
+    if _touches_infrastructure(touched_paths):
         score += 15
         risk_factors.append("Infrastructure changes")
         mitigations.append("Validate in staging environment first")
-    
-    # Determine risk level
+
     if score >= 70:
         risk_level = RiskLevel.CRITICAL
     elif score >= 50:
@@ -321,31 +312,37 @@ def assess_risk(req: RiskAssessmentReq) -> RiskAssessmentResponse:
         risk_level = RiskLevel.MEDIUM
     else:
         risk_level = RiskLevel.LOW
-    
-    return RiskAssessmentResponse(
-        risk_score=min(score, 100),
-        risk_level=risk_level,
-        risk_factors=risk_factors if risk_factors else ["No significant risk factors identified"],
-        mitigations_recommended=mitigations if mitigations else ["Standard review process sufficient"],
-        timestamp=datetime.now(timezone.utc).isoformat(),
-    )
+
+    response = {
+        "risk_score": min(score, 100),
+        "risk_level": risk_level.value,
+        "risk_factors": risk_factors if risk_factors else ["No significant risk factors identified"],
+        "mitigations_recommended": mitigations if mitigations else ["Standard review process sufficient"],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    return json.dumps(response, indent=2)
 
 
-@app.get("/healthz")
-def healthz() -> Dict[str, Any]:
-    """Health check endpoint - process is alive."""
-    return {
+# =============================================================================
+# MCP RESOURCES  (lightweight read-only info exposed via MCP)
+# =============================================================================
+
+@mcp.resource("health://status")
+def healthz() -> str:
+    """Health check - process is alive."""
+    return json.dumps({
         "status": "ok",
         "service": "change-mgmt-mcp",
         "version": "1.0.0",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
+    })
 
 
-@app.get("/readyz")
-def readyz() -> Dict[str, Any]:
-    """Readiness check endpoint - service ready to accept requests."""
-    return {
+@mcp.resource("health://ready")
+def readyz() -> str:
+    """Readiness check - service ready to accept requests."""
+    return json.dumps({
         "status": "ready",
         "service": "change-mgmt-mcp",
         "version": "1.0.0",
@@ -354,4 +351,13 @@ def readyz() -> Dict[str, Any]:
             "policy_config": "valid",
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
+    })
+
+
+# =============================================================================
+# ENTRYPOINT
+# =============================================================================
+
+if __name__ == "__main__":
+    print(f"Change Management MCP server starting on port {_port} (SSE transport)")
+    mcp.run(transport="sse")

@@ -60,3 +60,4 @@ logs/
 
 # Runtime-generated agent files
 agent/created_prs.json
+agent/modified_files.json

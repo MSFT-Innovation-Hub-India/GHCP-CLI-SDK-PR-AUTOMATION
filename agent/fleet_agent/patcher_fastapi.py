@@ -121,7 +121,17 @@ def _validate_and_write_file(
     Returns:
         Tuple of (success, error_message)
     """
-    full_path = repo / rel_path
+    # SAFETY: reject path-traversal attempts (e.g. "../../ui/backend/middleware.py")
+    if ".." in rel_path:
+        return False, f"Path traversal rejected: {rel_path}"
+    
+    full_path = (repo / rel_path).resolve()
+    
+    # SAFETY: ensure the resolved path is still inside the repo root
+    try:
+        full_path.relative_to(repo.resolve())
+    except ValueError:
+        return False, f"Path escapes repo root: {rel_path}"
     
     # Only validate Python files
     is_python = rel_path.endswith(".py")
@@ -214,8 +224,13 @@ def discover_fastapi_structure(repo: Path) -> FastAPIStructure:
     # Scan all Python files
     py_files = list(repo.rglob("*.py"))
     
-    # Skip common non-source directories
-    skip_dirs = {".venv", "venv", "__pycache__", ".git", "node_modules", ".tox", "dist", "build"}
+    # Skip common non-source directories and project infrastructure
+    skip_dirs = {
+        ".venv", "venv", "__pycache__", ".git", "node_modules",
+        ".tox", "dist", "build",
+        # Prevent scanning host project directories that aren't target repos
+        "ui", "mcp", "scripts", "agent", "knowledge", "docs", "images",
+    }
     py_files = [
         f for f in py_files 
         if not any(skip in f.parts for skip in skip_dirs)
@@ -804,6 +819,16 @@ def _apply_fallback_templates(repo: Path, service_name: str, drift: Drift) -> li
     This preserves the original behavior as a safety net, but now uses
     the discovered structure to determine file paths.
     """
+    # SAFETY CHECK: Only allow patching within agent/workspaces directory
+    agent_dir = Path(__file__).resolve().parents[1]
+    workspaces_dir = agent_dir / "workspaces"
+    repo_resolved = repo.resolve()
+    try:
+        repo_resolved.relative_to(workspaces_dir)
+    except ValueError:
+        print(f"   [PATCHER FALLBACK] SAFETY: Refusing to patch '{repo_resolved}' - outside workspaces", flush=True)
+        return []
+    
     touched: list[str] = []
     structure = drift.structure
     

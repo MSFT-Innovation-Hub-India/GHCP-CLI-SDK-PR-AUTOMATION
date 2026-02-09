@@ -326,8 +326,8 @@ Open **4 separate terminals**:
 
 | Terminal | Directory | Command |
 |----------|-----------|---------|
-| 1 | `mcp\change_mgmt` | `.venv\Scripts\Activate.ps1; uvicorn server:app --host 0.0.0.0 --port 4101` |
-| 2 | `mcp\security` | `.venv\Scripts\Activate.ps1; uvicorn server:app --host 0.0.0.0 --port 4102` |
+| 1 | `mcp\change_mgmt` | `.venv\Scripts\Activate.ps1; python server.py` |
+| 2 | `mcp\security` | `.venv\Scripts\Activate.ps1; python server.py` |
 | 3 | `ui\backend` | `..\..\agent\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000` |
 | 4 | `ui\frontend` | `npm run dev` |
 

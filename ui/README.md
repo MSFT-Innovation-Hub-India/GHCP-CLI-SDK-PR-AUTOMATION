@@ -40,12 +40,12 @@ React + FastAPI visual frontend for demonstrating the Fleet Compliance Agent.
    # Terminal 1
    cd mcp\change_mgmt
    .venv\Scripts\Activate.ps1
-   uvicorn server:app --host 0.0.0.0 --port 4101
+   python server.py
    
    # Terminal 2
    cd mcp\security
    .venv\Scripts\Activate.ps1
-   uvicorn server:app --host 0.0.0.0 --port 4102
+   python server.py
    ```
 
 2. **Python environment** with agent dependencies

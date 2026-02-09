@@ -4,3 +4,5 @@ nanoid==2.0.0
 openai>=1.60.0
 azure-identity>=1.15.0
 github-copilot-sdk>=0.1.21
+fastapi>=0.115.0
+mcp>=1.2.0
