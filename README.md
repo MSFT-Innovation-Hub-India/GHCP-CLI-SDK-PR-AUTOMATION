@@ -10,7 +10,11 @@ This demo showcases a Python-based compliance agent that automatically enforces 
 
 This demo implements **automated fleet-wide compliance enforcement** - an AI agent that audits multiple microservices, detects policy violations, applies fixes, and creates Pull Requests with evidence.
 
-> **💡 Production vs. Demo Mode:** In a production scenario, this agent would run **headlessly** - processing repositories one after another without any user interface, triggered by a schedule or event. This sample includes a **React-based GUI** to help you visualize and understand how embedding the GitHub Copilot SDK as an autonomous agent works. The GUI provides real-time visibility into the agent's reasoning and tool execution. Note that **human-in-the-loop would still be required** when reviewing and approving the Pull Requests created by the agent - the automation proposes, humans approve.
+> **💡 Production vs. Demo Mode:** In a production scenario, this agent would run **headlessly** — processing repositories one after another without any user interface, triggered by a schedule or event. This sample provides **two ways to run**:
+> - **React GUI** (`ui/`) — A visual dashboard for observing the agent in action. Ideal for demos and understanding how the SDK orchestrates tools in real time.
+> - **Console mode** (`agent/fleet_agent/agent_loop.py`) — A headless entry point that loads all repos from `config/repos.json` and processes them **sequentially in a single SDK session**, one after another. Run it directly with `python -m fleet_agent.agent_loop` from the `agent/` directory.
+>
+> In both modes, **human-in-the-loop is still required** — the agent proposes changes via Pull Requests, humans review and approve.
 
 ### SDK & AI Capabilities
 
