@@ -15,6 +15,8 @@ This demo implements **automated fleet-wide compliance enforcement** - an AI age
 > - **Console mode** (`agent/fleet_agent/agent_loop.py`) — A headless entry point that loads all repos from `config/repos.json` and processes them **sequentially in a single SDK session**, one after another. Run it directly with `python -m fleet_agent.agent_loop` from the `agent/` directory.
 >
 > In both modes, **human-in-the-loop is still required** — the agent proposes changes via Pull Requests, humans review and approve.
+>
+> **No natural language input required.** The only user-provided input is the list of repository URLs in `config/repos.json`. The prompt sent to the Copilot SDK is baked into the application code — there is no interactive prompt or conversational interface.
 
 ### SDK & AI Capabilities
 
