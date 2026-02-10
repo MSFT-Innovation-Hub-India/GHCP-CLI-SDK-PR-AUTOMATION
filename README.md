@@ -241,8 +241,8 @@ This project uses **Azure AI Search Knowledge Base** (FoundryIQ) for RAG — NOT
 │  │  • Auto-indexes documents on creation               │      │
 │  │  • Creates a local index in FoundryIQ               │      │
 │  └──────────────────────┬──────────────────────────────┘      │
-│                         │ consumed by                          │
-│                         ▼                                      │
+│                         │ consumed by                         │
+│                         ▼                                     │
 │  ┌─────────────────────────────────────────────────────┐      │
 │  │  Knowledge Base                                     │      │
 │  │  • Powered by LLM (gpt-4o)                          │      │

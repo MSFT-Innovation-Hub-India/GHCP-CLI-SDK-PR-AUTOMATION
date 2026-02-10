@@ -232,7 +232,7 @@ session = await client.create_session({
 │                         ▼                                          │
 │  ┌──────────────────────────────────────────────────────────┐      │
 │  │   ✅ Knowledge Base (what the agent queries)             │      │
-│  │   • Powered by LLM (gpt-4o) for reranking               │      │
+│  │   • Powered by LLM (gpt-4o) for reranking                │      │
 │  │   • Output Mode: Extractive data (verbatim text)         │      │
 │  │   • Reasoning Effort: AZURE_AI_KB_REASONING_EFFORT       │      │
 │  │   • Custom instructions for retrieval guidance           │      │
@@ -248,7 +248,7 @@ session = await client.create_session({
 │  │   • No chat completions from Azure OpenAI                │      │
 │  │   • LLM capability comes from GitHub Copilot SDK         │      │
 │  │   • Azure OpenAI model is used internally by KB for      │      │
-│  │     reranking only — agent code does not call it          │      │
+│  │     reranking only — agent code does not call it         │      │
 │  └──────────────────────────────────────────────────────────┘      │
 └────────────────────────────────────────────────────────────────────┘
 ```
