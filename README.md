@@ -6,56 +6,7 @@ This demo showcases a Python-based compliance agent that automatically enforces 
 
 ---
 
-## 🎬 Watch the Demo
-
-[![Fleet Compliance Agent Demo](https://img.youtube.com/vi/Oyv-tmG7q1k/maxresdefault.jpg)](https://youtu.be/Oyv-tmG7q1k)
-
-*Click the image above to watch the full demo video on YouTube*
-
----
-
-## 💡 Why GitHub Copilot SDK?
-
-**GitHub Copilot CLI** is typically used for interactive, natural language conversations - a developer types a question and gets a response. But what if you could harness that same AI capability **programmatically**?
-
-The **GitHub Copilot SDK** unlocks exactly this. By exposing the Copilot CLI through a Python SDK, it transforms from a conversational tool into a **programmable agent brain**.
-
-**How It Works:** The Python SDK spawns the Copilot CLI in **server mode** and communicates via **JSON-RPC**. Your code registers tools, sends prompts, and receives events - while the CLI handles authentication, model communication, and token management.
-
-```
-Your Application
-       ↓
-   SDK Client
-       ↓ JSON-RPC
-Copilot CLI (server mode)
-       ↓
-  GitHub Copilot API
-```
-
-```python
-# The SDK starts the CLI in server mode and manages the session
-client = CopilotClient()
-await client.start()  # Spawns copilot CLI as background process
-
-session = await client.create_session({
-    "system_message": {"content": SYSTEM_PROMPT},
-    "tools": [clone_tool, detect_drift_tool, apply_patches_tool, ...],
-})
-await session.send({"prompt": "Enforce compliance on contoso-payments-api"})
-# SDK autonomously calls tools, reasons over results, and completes the workflow
-```
-
-**The Key Insight:** Instead of a human typing prompts, **code drives the conversation** - sending structured prompts to the SDK, registering custom tools, and letting the SDK autonomously decide the execution path.
-
-This pattern enables **enterprise automation scenarios** that would be impossible with interactive CLI usage alone.
-
-> **🔑 Interactive vs. Embedded:** Developers typically use GitHub Copilot CLI or Agent Mode in VS Code **interactively** - asking questions, getting suggestions, and iterating in real-time. In this sample, we take a fundamentally different approach: **we embed the GitHub Copilot SDK directly into an autonomous agent**. The SDK becomes the reasoning engine for a fully automated workflow, not an interactive assistant.
-
-> **⚠️ Preview SDK Notice:** The GitHub Copilot SDK is currently in **preview**. This demo uses version `github-copilot-sdk>=0.1.21`.
-
----
-
-## 🎯 What This Demo Implements
+##  What This Demo Implements
 
 This demo implements **automated fleet-wide compliance enforcement** - an AI agent that audits multiple microservices, detects policy violations, applies fixes, and creates Pull Requests with evidence.
 
@@ -143,6 +94,55 @@ This demo implements **automated fleet-wide compliance enforcement** - an AI age
 | **Change Mgmt MCP** | Evaluates approval requirements per CM-7 matrix | `mcp/change_mgmt/` |
 | **Security MCP** | Scans dependencies for CVE vulnerabilities | `mcp/security/` |
 | **GitHub CLI** | Clones repos, creates branches, opens PRs | System tool (`gh`) |
+
+---
+
+## 🎬 Watch the Demo
+
+[![Fleet Compliance Agent Demo](https://img.youtube.com/vi/Oyv-tmG7q1k/maxresdefault.jpg)](https://youtu.be/Oyv-tmG7q1k)
+
+*Click the image above to watch the full demo video on YouTube*
+
+---
+
+## 💡 Why GitHub Copilot SDK?
+
+**GitHub Copilot CLI** is typically used for interactive, natural language conversations - a developer types a question and gets a response. But what if you could harness that same AI capability **programmatically**?
+
+The **GitHub Copilot SDK** unlocks exactly this. By exposing the Copilot CLI through a Python SDK, it transforms from a conversational tool into a **programmable agent brain**.
+
+**How It Works:** The Python SDK spawns the Copilot CLI in **server mode** and communicates via **JSON-RPC**. Your code registers tools, sends prompts, and receives events - while the CLI handles authentication, model communication, and token management.
+
+```
+Your Application
+       ↓
+   SDK Client
+       ↓ JSON-RPC
+Copilot CLI (server mode)
+       ↓
+  GitHub Copilot API
+```
+
+```python
+# The SDK starts the CLI in server mode and manages the session
+client = CopilotClient()
+await client.start()  # Spawns copilot CLI as background process
+
+session = await client.create_session({
+    "system_message": {"content": SYSTEM_PROMPT},
+    "tools": [clone_tool, detect_drift_tool, apply_patches_tool, ...],
+})
+await session.send({"prompt": "Enforce compliance on contoso-payments-api"})
+# SDK autonomously calls tools, reasons over results, and completes the workflow
+```
+
+**The Key Insight:** Instead of a human typing prompts, **code drives the conversation** - sending structured prompts to the SDK, registering custom tools, and letting the SDK autonomously decide the execution path.
+
+This pattern enables **enterprise automation scenarios** that would be impossible with interactive CLI usage alone.
+
+> **🔑 Interactive vs. Embedded:** Developers typically use GitHub Copilot CLI or Agent Mode in VS Code **interactively** - asking questions, getting suggestions, and iterating in real-time. In this sample, we take a fundamentally different approach: **we embed the GitHub Copilot SDK directly into an autonomous agent**. The SDK becomes the reasoning engine for a fully automated workflow, not an interactive assistant.
+
+> **⚠️ Preview SDK Notice:** The GitHub Copilot SDK is currently in **preview**. This demo uses version `github-copilot-sdk>=0.1.21`.
 
 ---
 
