@@ -3,6 +3,11 @@ MCP (Model Context Protocol) Client Module
 ==========================================
 Connects to MCP servers using the proper MCP protocol over SSE transport.
 
+Server URLs are resolved in priority order:
+1. **mcp.json** — project-level MCP server manifest (standard convention)
+2. **Environment variables** — CHANGE_MGMT_URL / SECURITY_URL overrides
+3. **Defaults** — http://localhost:4101 / http://localhost:4102
+
 This module provides thin wrappers that call MCP tools on two remote servers:
 
 1. **Change Management Server** (default port 4101)
@@ -13,10 +18,6 @@ This module provides thin wrappers that call MCP tools on two remote servers:
    - scan_dependencies: CVE vulnerability scan
    - scan_detailed: detailed scan with filters
    - get_vulnerability: single CVE lookup
-
-Environment Variables:
-    CHANGE_MGMT_URL: Base URL for Change Management MCP (default: http://localhost:4101)
-    SECURITY_URL: Base URL for Security MCP (default: http://localhost:4102)
 
 Usage:
     from fleet_agent.mcp_clients import approval, security_scan
@@ -40,16 +41,70 @@ import asyncio
 import concurrent.futures
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 
 # ---------------------------------------------------------------------------
-# Server base URLs – the SSE endpoint is at  <base>/sse
+# Server URL resolution: mcp.json → env vars → defaults
 # ---------------------------------------------------------------------------
-_change_mgmt_base = os.getenv("CHANGE_MGMT_URL", "http://localhost:4101").rstrip("/")
-_security_base = os.getenv("SECURITY_URL", "http://localhost:4102").rstrip("/")
+
+_DEFAULTS = {
+    "change_mgmt": "http://localhost:4101",
+    "security": "http://localhost:4102",
+}
+
+
+def _load_mcp_config() -> dict[str, str]:
+    """
+    Load MCP server base URLs from the project-root ``mcp.json``.
+
+    Returns a dict mapping server name → base URL (without /sse suffix).
+    Falls back to empty dict if the file is missing or unparseable.
+    """
+    # Walk upward from this file to find mcp.json at the project root
+    # mcp_clients.py  →  fleet_agent/  →  agent/  →  project root
+    project_root = Path(__file__).resolve().parents[2]
+    mcp_json = project_root / "mcp.json"
+
+    if not mcp_json.exists():
+        return {}
+
+    try:
+        config = json.loads(mcp_json.read_text(encoding="utf-8"))
+        servers = config.get("mcpServers", {})
+        urls: dict[str, str] = {}
+        for name, spec in servers.items():
+            url = spec.get("url", "")
+            # Strip /sse suffix so callers can append it themselves
+            urls[name] = url.removesuffix("/sse").rstrip("/")
+        return urls
+    except Exception as exc:
+        print(f"[MCP] Warning: could not parse mcp.json: {exc}")
+        return {}
+
+
+def _resolve_url(server_name: str, env_var: str) -> str:
+    """Resolve a server URL: mcp.json → env var → built-in default."""
+    mcp_urls = _load_mcp_config()
+
+    # 1. mcp.json
+    if server_name in mcp_urls:
+        return mcp_urls[server_name]
+
+    # 2. Environment variable override
+    env_val = os.getenv(env_var)
+    if env_val:
+        return env_val.rstrip("/")
+
+    # 3. Hardcoded default
+    return _DEFAULTS[server_name]
+
+
+_change_mgmt_base = _resolve_url("change_mgmt", "CHANGE_MGMT_URL")
+_security_base = _resolve_url("security", "SECURITY_URL")
 
 
 # ---------------------------------------------------------------------------

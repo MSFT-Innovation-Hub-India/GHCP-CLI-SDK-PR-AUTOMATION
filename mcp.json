@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "change_mgmt": {
+      "url": "http://localhost:4101/sse",
+      "transport": "sse",
+      "description": "Change Management MCP — approval matrix evaluation (CM-7 policy)",
+      "tools": ["evaluate_approval", "assess_risk"]
+    },
+    "security": {
+      "url": "http://localhost:4102/sse",
+      "transport": "sse",
+      "description": "Security Scan MCP — dependency vulnerability scanning (SEC-2.4 policy)",
+      "tools": ["scan_dependencies", "scan_detailed", "get_vulnerability"]
+    }
+  }
+}

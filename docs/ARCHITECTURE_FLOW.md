@@ -202,22 +202,22 @@ session = await client.create_session({
 ### 2. Azure OpenAI: Vector Store Only (NOT LLM)
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                     Azure OpenAI Service                       │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │   ✅ USED: Vector Store                                  │  │
-│  │   • Endpoint: Configured via AZURE_OPENAI_ENDPOINT       │  │
-│  │   • Vector Store ID: Configured via AZURE_OPENAI_VECTOR_STORE_ID │
-│  │   • Embedding Model: text-embedding-3-small              │  │
-│  │   • Responses API with file_search tool                  │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │   ❌ NOT USED: LLM Models (gpt-4o, etc.)                 │  │
-│  │   • No chat completions from Azure OpenAI                │  │
-│  │   • LLM capability comes from GitHub Copilot SDK         │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                     Azure OpenAI Service                           │
+│  ┌──────────────────────────────────────────────────────────┐      │
+│  │   ✅ USED: Vector Store                                  │     │
+│  │   • Endpoint: Configured via AZURE_OPENAI_ENDPOINT       │      │
+│  │   • Vector Store ID: AZURE_OPENAI_VECTOR_STORE_ID        |      │
+│  │   • Embedding Model: text-embedding-3-small              │      │
+│  │   • Responses API with file_search tool                  │      │
+│  └──────────────────────────────────────────────────────────┘      │
+│                                                                    │
+│  ┌──────────────────────────────────────────────────────────┐      │
+│  │   ❌ NOT USED: LLM Models (gpt-4o, etc.)                 │     │
+│  │   • No chat completions from Azure OpenAI                │      │
+│  │   • LLM capability comes from GitHub Copilot SDK         │      │
+│  └──────────────────────────────────────────────────────────┘      │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 3. GitHub Copilot SDK Integration
@@ -236,7 +236,7 @@ session = await client.create_session({
 │  ┌──────────┐    JSON-RPC    ┌─────────────┐     API     ┌───────┐ │
 │  │ Python   │ ──────────────▶│ Copilot CLI │ ──────────▶│GitHub │ │
 │  │ SDK      │                │ (server     │             │Copilot│ │
-│  │          │◀──────────────│  mode)      │◀──────────│ API     │ │
+│  │          │◀──────────────│  mode)      │◀──────────  │ API   │ │
 │  └──────────┘   SSE Events   └─────────────┘             └───────┘ │
 │                                                                    │
 │  Streaming Implementation:                                         │
@@ -434,17 +434,142 @@ sequenceDiagram
 
 ---
 
+## Production Architecture (Headless / Fleet Scale)
+
+The demo runs a single SDK session processing repos sequentially — sufficient for 3-5 repos. For production fleet enforcement (50+ repos), the architecture shifts to **parallel workers with per-repo isolation**.
+
+### Demo vs. Production
+
+| Aspect | Demo (Current) | Production (Target) |
+|--------|---------------|---------------------|
+| **Execution** | Single SDK session, all repos in one prompt | One SDK session per repo, parallel workers |
+| **Concurrency** | Sequential — repo 2 waits for repo 1 | Parallel — configurable worker pool |
+| **Trigger** | Manual (UI button or `python -m fleet_agent.agent_loop`) | Scheduled (cron, Azure Timer Function) or event-driven (webhook) |
+| **State** | In-memory + ephemeral JSON files | Persistent store (DB or blob) for retry/resume |
+| **Failure handling** | Entire run fails if one repo errors | Per-repo retry with exponential backoff |
+| **Reporting** | Console stdout or WebSocket stream | Structured results to dashboard/Slack/ITSM |
+| **Infrastructure** | Developer laptop | Container (ACA, AKS) or Azure Functions |
+
+### Production Architecture Diagram
+
+```mermaid
+flowchart TB
+    subgraph Trigger["⏰ Trigger"]
+        CRON[Scheduled<br/>cron / Timer Function]
+        WEBHOOK[Event-Driven<br/>repo push / webhook]
+        CLI[Manual<br/>CLI invocation]
+    end
+
+    subgraph Orchestrator["🎯 Orchestrator"]
+        DISPATCH[Dispatcher<br/>Reads repos.json or registry<br/>Enqueues one job per repo]
+        QUEUE[(Job Queue<br/>Azure Queue / Redis)]
+    end
+
+    subgraph Workers["⚙️ Worker Pool (N parallel)"]
+        W1[Worker 1<br/>SDK Session<br/>contoso-orders-api]
+        W2[Worker 2<br/>SDK Session<br/>contoso-payments-api]
+        W3[Worker 3<br/>SDK Session<br/>contoso-catalog-api]
+        WN[Worker N<br/>SDK Session<br/>...]
+    end
+
+    subgraph PerWorker["Per-Worker Flow (same 13 tools)"]
+        direction LR
+        RAG[RAG Search] --> CLONE[Clone]
+        CLONE --> DETECT[Detect Drift]
+        DETECT --> SCAN[Security Scan]
+        SCAN --> PATCH[Apply Patches]
+        PATCH --> TEST[Run Tests]
+        TEST --> PR[Create PR]
+    end
+
+    subgraph SharedServices["🌐 Shared Services"]
+        AOAI[(Azure OpenAI<br/>Vector Store)]
+        MCP_SEC[MCP Security<br/>:4102]
+        MCP_CM[MCP Change Mgmt<br/>:4101]
+        GH[(GitHub)]
+    end
+
+    subgraph Results["📊 Results"]
+        STATE[(State Store<br/>per-repo status<br/>retry tracking)]
+        REPORT[Reporting<br/>Dashboard / Slack<br/>/ ITSM ticket]
+    end
+
+    CRON & WEBHOOK & CLI --> DISPATCH
+    DISPATCH --> QUEUE
+    QUEUE --> W1 & W2 & W3 & WN
+
+    W1 & W2 & W3 & WN --> PerWorker
+    PerWorker --> AOAI & MCP_SEC & MCP_CM & GH
+
+    W1 & W2 & W3 & WN --> STATE
+    STATE --> REPORT
+
+    style Trigger fill:#f0f0f0,stroke:#999
+    style Workers fill:#e8f4fd,stroke:#4a9eff
+    style SharedServices fill:#fff3e0,stroke:#ff9944
+    style Results fill:#e8f5e9,stroke:#4caf50
+```
+
+### Key Production Design Decisions
+
+1. **One SDK session per repo** — Each worker creates its own `CopilotClient` and session. This avoids context window overflow and enables independent timeouts/retries per repo.
+
+2. **Worker pool sizing** — Limited by Copilot API rate limits and MCP server capacity. Start with 3-5 concurrent workers and tune based on throughput.
+
+3. **Idempotent re-runs** — Before cloning, check if a compliance PR already exists for the target branch. Skip repos that already have an open PR.
+
+4. **State store** — Track per-repo status (`queued`, `in_progress`, `completed`, `failed`, `retrying`). Enables resume-after-failure without re-processing successful repos.
+
+5. **MCP server scaling** — The current single-instance MCP servers become a bottleneck at scale. Deploy behind a load balancer or use the MCP `stdio` transport with per-worker server instances.
+
+6. **Secrets management** — Move from `.env` file to Azure Key Vault or GitHub Actions secrets. Each worker authenticates independently.
+
+### Console Entry Point — Current vs. Parallel
+
+The current `main()` in `agent_loop.py` sends all repos in one prompt:
+
+```python
+# Current: sequential, single session
+def main():
+    repos = load_repos()
+    user_input = build_prompt(repos)       # All repos in one prompt
+    result = asyncio.run(run_agent(user_input))  # One session
+```
+
+A production version would dispatch per-repo:
+
+```python
+# Production: parallel, one session per repo
+async def main_parallel():
+    repos = load_repos()
+    semaphore = asyncio.Semaphore(5)  # Max 5 concurrent
+
+    async def process_one(url: str):
+        async with semaphore:
+            prompt = build_prompt([url])   # Single repo
+            return await run_agent(prompt) # Own session
+
+    results = await asyncio.gather(
+        *[process_one(url) for url in repos],
+        return_exceptions=True
+    )
+```
+
+---
+
 ## Summary Table
 
-| Aspect | Implementation |
-|--------|----------------|
-| **Loop Structure** | Sequential per-repo, SDK-driven tool calls (13 tools) |
-| **Tool Autonomy** | Yes - SDK decides tool order based on reasoning |
-| **State Persistence** | Global: evidence, settings. Per-repo: workspace, drift, branch |
-| **Memory** | No long-term memory; fresh workspace each run |
-| **Azure OpenAI** | Vector Store ONLY (file_search), NOT LLM |
-| **LLM Provider** | GitHub Copilot SDK via Copilot CLI |
-| **Streaming** | Event-based: tool calls and messages stream to UI |
-| **Error Handling** | Tests can fail, PR still created (human decides) |
-| **Completion Detection** | SDK signals session.idle when task complete |
+| Aspect | Demo | Production |
+|--------|------|------------|
+| **Loop Structure** | Sequential per-repo, single SDK session | Parallel workers, one SDK session per repo |
+| **Tool Autonomy** | Yes - SDK decides tool order based on reasoning | Same |
+| **State Persistence** | Ephemeral JSON files, cleared each run | Persistent store with retry tracking |
+| **Memory** | No long-term memory; fresh workspace each run | Same — stateless per-repo |
+| **Azure OpenAI** | Vector Store ONLY (file_search), NOT LLM | Same |
+| **LLM Provider** | GitHub Copilot SDK via Copilot CLI | Same |
+| **Streaming** | Event-based: tool calls and messages stream to UI | Structured logs to observability platform |
+| **Error Handling** | Tests can fail, PR still created (human decides) | Same + per-repo retry with backoff |
+| **Completion Detection** | SDK signals session.idle when task complete | Same + state store updated |
+| **Trigger** | Manual (button click or CLI) | Scheduled or event-driven |
+| **Concurrency** | 1 (sequential) | N (configurable worker pool) |
 

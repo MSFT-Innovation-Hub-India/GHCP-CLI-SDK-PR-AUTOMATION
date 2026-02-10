@@ -7,25 +7,66 @@
 
 ## Demo Modes
 
-| Mode | Command | Best For |
-|------|---------|----------|
-| **Visual UI** | `.\\scripts\\start-ui.ps1` | Live demos, presentations |
-| **Console** | `.\\scripts\\run-agent-agentic.ps1` | Development, debugging |
+| Mode | How to Run | Best For |
+|------|------------|----------|
+| **Visual UI** | Start MCP servers + UI backend + frontend (4 terminals) | Live demos, presentations |
+| **Console** | Start MCP servers + `python -m fleet_agent.agent_loop` | Development, debugging |
 
 ---
 
 ## Pre-Demo Setup
 
 Before the demo:
-- [ ] GitHub repos created and pushed (contoso-*-api)
-- [ ] MCP servers running (`.\\scripts\\start-mcp-servers.ps1`)
-- [ ] Agent environment ready (`.\\scripts\\setup.ps1`)
-- [ ] For UI mode: Node.js 18+ installed
+- [ ] GitHub repos created and pushed (`contoso-*-api`) — use `scripts/push-sample-repos.ps1`
+- [ ] `agent/.env` configured (Azure OpenAI, Copilot CLI path, MCP URLs)
+- [ ] Azure OpenAI vector store deployed — `python scripts/deploy-vector-store.py`
+- [ ] Virtual environments set up (`agent/.venv`, `mcp/change_mgmt/.venv`, `mcp/security/.venv`)
+- [ ] GitHub CLI authenticated — `gh auth login`
+- [ ] Azure CLI authenticated — `az login`
+- [ ] MCP servers running (2 terminals — see below)
+- [ ] For UI mode: Node.js 18+ installed, `npm install` done in `ui/frontend/`
 - [ ] Browser tabs open:
-  - GitHub org/user page
-  - localhost:4101/docs (Change Mgmt Swagger)
-  - localhost:4102/docs (Security Swagger)
-  - localhost:3001 (UI - if using visual mode)
+  - GitHub org/user page (to show PRs being created)
+  - http://localhost:5173 (UI frontend — if using visual mode)
+
+### Starting MCP Servers (Required for Both Modes)
+
+**Terminal 1 — Change Management MCP (port 4101):**
+```powershell
+cd mcp\change_mgmt
+.venv\Scripts\Activate.ps1
+python server.py
+```
+
+**Terminal 2 — Security MCP (port 4102):**
+```powershell
+cd mcp\security
+.venv\Scripts\Activate.ps1
+python server.py
+```
+
+### Starting the UI (Visual Mode Only)
+
+**Terminal 3 — FastAPI Backend (port 8000):**
+```powershell
+cd ui\backend
+..\..\agent\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+**Terminal 4 — React Frontend (port 5173):**
+```powershell
+cd ui\frontend
+npm run dev
+```
+
+### Running Console Mode
+
+**Terminal 3 — Agent (after MCP servers are running):**
+```powershell
+cd agent
+.venv\Scripts\Activate.ps1
+python -m fleet_agent.agent_loop
+```
 
 ---
 
@@ -80,24 +121,31 @@ knowledge/
 
 ### 4. Show MCP Integration (1 min)
 
-Open browser to `http://localhost:4101/docs`:
+**Explain the MCP servers:**
 
-**Demo the `/approval` endpoint:**
+**Say:** "We have two MCP servers — Model Context Protocol — that provide domain-specific intelligence. The Security server scans dependencies for CVEs, and the Change Management server evaluates who needs to approve changes based on service tier and files touched."
+
+**Show `mcp.json` at the project root:**
 ```json
 {
-  "service": "contoso-payments-api",
-  "touched_paths": ["app/auth.py"]
+  "mcpServers": {
+    "change_mgmt": {
+      "url": "http://localhost:4101/sse",
+      "transport": "sse",
+      "tools": ["evaluate_approval", "assess_risk"]
+    },
+    "security": {
+      "url": "http://localhost:4102/sse",
+      "transport": "sse",
+      "tools": ["scan_dependencies", "scan_detailed", "get_vulnerability"]
+    }
+  }
 }
 ```
 
-**Show response:**
-```json
-{
-  "required_approvals": ["SRE-Prod", "Security"],
-  "rationale": "High-impact service; Security-sensitive files",
-  "risk_level": "high"
-}
-```
+**Say:** "This `mcp.json` follows the emerging standard — the same format VS Code, Codex, and Claude Desktop use to discover MCP servers. Our agent reads URLs from this file at startup."
+
+**Show `mcp/change_mgmt/server.py`** — highlight the `@mcp.tool()` decorators and the approval logic (high-impact services like payments require SRE approval).
 
 **Say:** "The Change Management MCP evaluates who needs to approve based on service tier and what files were touched. Payments + auth files = SRE and Security approval required."
 
@@ -107,11 +155,7 @@ Open browser to `http://localhost:4101/docs`:
 
 **Option A: Visual UI (Recommended for Demos)**
 
-```powershell
-.\\scripts\\start-ui.ps1
-```
-
-Open http://localhost:3001 and click **\"Run Fleet Agent\"**
+Start all 4 terminals as described in Pre-Demo Setup, then open http://localhost:5173.
 
 **UI Highlights to show:**
 - System status indicators (green checkmarks)
@@ -123,9 +167,11 @@ Open http://localhost:3001 and click **\"Run Fleet Agent\"**
 
 **Option B: Console Mode**
 
-In terminal:
+In terminal (with MCP servers already running):
 ```powershell
-.\scripts\run-agent-agentic.ps1
+cd agent
+.venv\Scripts\Activate.ps1
+python -m fleet_agent.agent_loop
 ```
 
 **Narrate as it runs:**
@@ -219,7 +265,8 @@ A: You'd add patchers for other languages. The architecture is pluggable.
 
 After demo:
 ```powershell
-.\scripts\stop-mcp-servers.ps1
-# Optionally delete test PRs from GitHub
+# Stop MCP servers (Ctrl+C in their terminals)
+# Optionally delete test PRs from GitHub:
+#   gh pr close <PR_NUMBER> --repo <OWNER>/<REPO> --delete-branch
 ```
 

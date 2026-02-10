@@ -1112,6 +1112,10 @@ async def run_agent(user_input: str) -> AgentRunResult:
 
 def main():
     """Run the agent with repository URLs from config."""
+    # Clear state files from previous runs
+    clear_created_prs()
+    clear_modified_files()
+
     # Load repos
     repos_config = ROOT / "config" / "repos.json"
     repos = json.loads(repos_config.read_text(encoding="utf-8"))["repos"]

@@ -496,7 +496,46 @@ This demo implements a pattern applicable to enterprise environments. The **"aut
 
 ---
 
-## 🐛 Troubleshooting
+## �️ Responsible AI Considerations
+
+This solution operates as a **headless, autonomous agent** — there is no conversational exchange between the agent and end users. The agent receives hardcoded prompts derived from configuration (`repos.json`, policy documents in `knowledge/`), executes a deterministic workflow, and produces code patches and Pull Requests. Humans re-enter the loop only at the PR review stage.
+
+Given this design, many traditional Responsible AI concerns that apply to interactive AI systems (chatbots, content generators, user-facing assistants) are **not applicable** here:
+
+| RAI Concern | Applicability | Reasoning |
+|-------------|---------------|-----------|
+| **Harmful content generation** | Not applicable | No user-supplied prompts. All inputs are controlled: repo URLs from config, policy text from curated knowledge base, system prompt hardcoded in source. |
+| **Bias and fairness** | Not applicable | The agent makes decisions about source code compliance, not about people. There are no demographic, hiring, lending, or content moderation decisions. |
+| **PII and data privacy** | Not applicable | The agent processes source code and dependency manifests. No personal data is ingested, stored, or generated. |
+| **Prompt injection** | Minimal risk | There is no user-facing input surface. The only external input is the target repository's source code, which is processed by deterministic analysis (AST parsing, regex) — not passed raw to the LLM. |
+
+### What has been considered
+
+Despite the low-risk profile, the following safeguards are in place:
+
+1. **Human-in-the-loop by design** — The agent proposes changes via Pull Requests; it never auto-merges. The CM-7 approval matrix routes PRs to specific human reviewers (SRE, Security, ServiceOwner) based on service tier and files modified. Every code change requires explicit human approval before reaching production.
+
+2. **Code correctness validation** — All generated patches are validated with `ast.parse()` for syntax correctness before being written. Tests are run (`pytest`) against the patched code before the PR is opened. If tests fail, the agent attempts SDK-based code fixing (up to 3 retries), and the test results are reported in the PR for reviewer awareness.
+
+3. **Grounded outputs (RAG)** — PR descriptions cite evidence from the organization's own policy documents retrieved from the Azure OpenAI vector store. This grounds the LLM's output in organizational policy rather than relying on the model's training data, reducing hallucination risk in policy citations.
+
+4. **Bounded agent actions** — The Copilot SDK session is restricted to 13 explicitly registered custom tools via the `available_tools` whitelist. The SDK cannot use built-in file-write or terminal tools. All file writes are further constrained by path traversal guards and a workspace-only boundary check.
+
+5. **No retained state or learning** — Each run starts clean — workspaces are ephemeral, state files are cleared, and the SDK session has no memory of prior runs. The agent cannot accumulate or leak context across executions.
+
+6. **Single-user execution context** — The agent runs under the operator's own GitHub and Azure credentials. There is no multi-tenant access, no shared execution context, and no credential delegation. The operator sees exactly what the agent sees.
+
+### When to revisit
+
+These considerations should be re-evaluated if the solution evolves to:
+- Accept **user-provided prompts** (e.g., "scan this repo for X") — would introduce prompt injection risk
+- Process **external/untrusted repositories** — source code could contain adversarial content in comments or filenames
+- Run as a **multi-tenant service** — would require credential isolation and access control
+- Generate **user-facing content** beyond PR descriptions — would require content safety filters
+
+---
+
+## �🐛 Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
