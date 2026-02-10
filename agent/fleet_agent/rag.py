@@ -5,6 +5,16 @@ import os
 import re
 from openai import OpenAI
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from azure.search.documents.knowledgebases import KnowledgeBaseRetrievalClient
+from azure.search.documents.knowledgebases.models import (
+    KnowledgeBaseMessage,
+    KnowledgeBaseMessageTextContent,
+    KnowledgeBaseRetrievalRequest,
+    KnowledgeRetrievalLowReasoningEffort,
+    KnowledgeRetrievalMediumReasoningEffort,
+    KnowledgeRetrievalMinimalReasoningEffort,
+    KnowledgeRetrievalOutputMode,
+)
 
 @dataclass(frozen=True)
 class Hit:
@@ -49,70 +59,178 @@ def _get_client() -> OpenAI:
     )
 
 
+def _get_kb_client() -> KnowledgeBaseRetrievalClient:
+    endpoint = os.getenv("AZURE_AI_SEARCH_ENDPOINT", "")
+    kb_name = os.getenv("AZURE_AI_KB_NAME", "")
+
+    if not endpoint or not kb_name:
+        raise ValueError(
+            "AZURE_AI_SEARCH_ENDPOINT and AZURE_AI_KB_NAME must be set"
+        )
+
+    return KnowledgeBaseRetrievalClient(
+        endpoint=endpoint,
+        knowledge_base_name=kb_name,
+        credential=DefaultAzureCredential(),
+    )
+
+
+def _kb_reasoning_effort() -> object:
+    value = os.getenv("AZURE_AI_KB_REASONING_EFFORT", "low").strip().lower()
+    if value == "minimal":
+        return KnowledgeRetrievalMinimalReasoningEffort()
+    if value == "low":
+        return KnowledgeRetrievalLowReasoningEffort()
+    return KnowledgeRetrievalMediumReasoningEffort()
+
+
+def _extract_kb_hits(result: object, k: int) -> list[Hit]:
+    import json as _json
+
+    hits: list[Hit] = []
+    references = getattr(result, "references", None) or []
+
+    # Build lookup: ref index -> metadata from the references list
+    ref_meta: dict[int, tuple[str, float]] = {}
+    for idx, ref in enumerate(references):
+        blob_url = getattr(ref, "blob_url", None) or ""
+        # Use the last path segment of the blob URL as a readable doc id
+        doc_id = blob_url.rsplit("/", 1)[-1] if blob_url else f"reference-{idx}"
+        score = getattr(ref, "reranker_score", None) or 1.0
+        ref_meta[idx] = (doc_id, float(score))
+
+    # Extract content from the response messages.
+    # The KB returns extractive data as a JSON array in
+    # result.response[0].content[0].text with objects like
+    # {"ref_id": 0, "content": "..."}
+    resp_messages = getattr(result, "response", None) or []
+    for msg in resp_messages:
+        msg_content = getattr(msg, "content", None) or []
+        for block in msg_content:
+            text = getattr(block, "text", None) or ""
+            if not text:
+                continue
+            try:
+                items = _json.loads(text)
+            except (_json.JSONDecodeError, TypeError):
+                # Not JSON – treat the raw text as a single hit
+                items = [{"ref_id": 0, "content": text}]
+
+            if not isinstance(items, list):
+                items = [items]
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                content = item.get("content") or item.get("text") or ""
+                if not content:
+                    continue
+                ref_id = item.get("ref_id", 0)
+                doc_id, score = ref_meta.get(ref_id, (f"reference-{ref_id}", 1.0))
+                hits.append(Hit(
+                    doc_id=doc_id,
+                    score=score,
+                    excerpt=_extract_excerpt(content),
+                ))
+                if len(hits) >= k:
+                    return hits
+
+    return hits
+
+
 def search(query: str, k: int = 4) -> list[Hit]:
     """
-    Search the Azure OpenAI vector store using the Responses API with file_search tool.
-    
+    Search the Azure AI Search knowledge base and return extractive results.
+
+    If the knowledge base settings are not configured, falls back to local
+    markdown search. The Azure OpenAI Responses API search is kept for
+    reference only and is not used by the application.
+
     Args:
         query: The search query string
         k: Maximum number of results to return (default: 4)
-    
+
     Returns:
         List of Hit objects with document ID, score, and excerpt
     """
+    if not (
+        os.getenv("AZURE_AI_SEARCH_ENDPOINT")
+        and os.getenv("AZURE_AI_KB_NAME")
+    ):
+        raise ValueError(
+            "Azure AI Search knowledge base settings are required for RAG. "
+            "Set AZURE_AI_SEARCH_ENDPOINT and AZURE_AI_KB_NAME."
+        )
+
+    client = _get_kb_client()
+    request = KnowledgeBaseRetrievalRequest(
+        messages=[
+            KnowledgeBaseMessage(
+                role="user",
+                content=[KnowledgeBaseMessageTextContent(text=query.strip())],
+            )
+        ],
+        include_activity=False,
+        output_mode=KnowledgeRetrievalOutputMode.EXTRACTIVE_DATA,
+        retrieval_reasoning_effort=_kb_reasoning_effort(),
+    )
+    result = client.retrieve(request)
+    return _extract_kb_hits(result, k)
+
+
+def search_openai_vector_store_reference(query: str, k: int = 4) -> list[Hit]:
+    """
+    Reference implementation for Azure OpenAI Responses API + file_search.
+    Not used by the application; kept for comparison and fallback testing.
+    """
     vector_store_id = os.getenv("AZURE_OPENAI_VECTOR_STORE_ID", "")
     deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-    
+
     if not vector_store_id:
         raise ValueError("AZURE_OPENAI_VECTOR_STORE_ID must be set")
-    
+
     client = _get_client()
-    
-    # Use Responses API with file_search tool
+
     response = client.responses.create(
         model=deployment,
         input=query,
         tools=[{
             "type": "file_search",
             "vector_store_ids": [vector_store_id],
-            "max_num_results": k
-        }]
+            "max_num_results": k,
+        }],
     )
-    
+
     hits: list[Hit] = []
     seen_files: set[str] = set()
-    
-    # Extract results from the response outputs
+
     for output in response.output:
-        # Check file_search_call results first (direct search results)
         if output.type == "file_search_call" and output.results:
             for result in output.results:
-                file_id = getattr(result, 'filename', None) or getattr(result, 'file_id', 'unknown')
+                file_id = getattr(result, "filename", None) or getattr(result, "file_id", "unknown")
                 if file_id not in seen_files:
                     seen_files.add(file_id)
                     hits.append(Hit(
                         doc_id=file_id,
-                        score=getattr(result, 'score', 1.0),
-                        excerpt=_extract_excerpt(getattr(result, 'text', ''))
+                        score=getattr(result, "score", 1.0),
+                        excerpt=_extract_excerpt(getattr(result, "text", "")),
                     ))
-        
-        # Also check message outputs for file citations (Azure OpenAI format)
-        elif output.type == "message" and hasattr(output, 'content'):
+
+        elif output.type == "message" and hasattr(output, "content"):
             for content_block in output.content:
-                if hasattr(content_block, 'annotations'):
+                if hasattr(content_block, "annotations"):
                     for annotation in content_block.annotations:
-                        if hasattr(annotation, 'filename') and annotation.filename:
+                        if hasattr(annotation, "filename") and annotation.filename:
                             file_id = annotation.filename
                             if file_id not in seen_files:
                                 seen_files.add(file_id)
-                                # Extract relevant excerpt from the content text
-                                text = getattr(content_block, 'text', '')
+                                text = getattr(content_block, "text", "")
                                 hits.append(Hit(
                                     doc_id=file_id,
-                                    score=1.0,  # Citations don't have scores
-                                    excerpt=_extract_excerpt(text)
+                                    score=1.0,
+                                    excerpt=_extract_excerpt(text),
                                 ))
-    
+
     return hits[:k]
 
 

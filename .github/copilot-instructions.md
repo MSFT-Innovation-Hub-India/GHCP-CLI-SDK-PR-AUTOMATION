@@ -17,7 +17,7 @@ Entry Points
 Agent Core (agent/fleet_agent/)
 ├── agent_loop.py       — 13 custom tools registered with Copilot SDK, system prompt, agentic loop
 ├── patcher_fastapi.py  — Compliance drift detection + SDK-powered code patching
-├── rag.py              — Azure OpenAI Responses API with file_search (vector store only, NOT LLM)
+├── rag.py              — Azure AI Search Knowledge Base (FoundryIQ) extractive retrieval for RAG
 ├── mcp_clients.py      — MCP protocol clients (SSE transport) for security + change-mgmt servers
 └── github_ops.py       — Git/GitHub CLI wrappers (clone, branch, commit, push, PR)
 
@@ -28,8 +28,8 @@ MCP Servers (mcp/)
 Configuration
 ├── mcp.json               — MCP server manifest (standard convention)
 ├── agent/config/repos.json — Target repository URLs
-├── agent/.env              — Environment variables (Azure OpenAI, Copilot CLI path, MCP URLs)
-└── knowledge/*.md          — Policy documents uploaded to Azure OpenAI vector store for RAG
+├── agent/.env              — Environment variables (Azure AI Search KB, Copilot CLI path, MCP URLs)
+└── knowledge/*.md          — Policy documents indexed in Azure AI Search knowledge source for RAG
 ```
 
 ## Critical Design Decisions
@@ -57,10 +57,14 @@ Configuration
 
 ### RAG (Knowledge Base Search)
 
-- Uses **Azure OpenAI Responses API** with the `file_search` tool and a native vector store.
-- Azure OpenAI is used **only for vector search** — NOT for LLM reasoning. All LLM capability comes from the Copilot SDK.
-- The deployment model name (e.g., `gpt-4o`) is required by the Responses API even though it's used for search, not generation. Read from `AZURE_OPENAI_DEPLOYMENT` env var.
+- Uses **Azure AI Search Knowledge Base** (FoundryIQ) with the `KnowledgeBaseRetrievalClient` from `azure-search-documents==11.7.0b2`.
+- **Setup pipeline:** Policy markdown files from `knowledge/` are uploaded to an **Azure Blob Storage** container. A **Knowledge Source** in FoundryIQ points to this container — it automatically indexes the documents and creates a **local index**. A **Knowledge Base** then consumes this knowledge source, powered by an LLM (e.g., `gpt-4o`), with configurable instructions, output mode, and reasoning effort.
+- The KB is configured with **extractive data** output mode — it returns verbatim text from policy documents, not synthesized answers.
+- Azure OpenAI is used **only** by the KB internally for reranking — the agent code does NOT call Azure OpenAI directly. All LLM capability comes from the Copilot SDK.
+- The response structure: extractive content is in `result.response[0].content[0].text` as a JSON array of `{"ref_id": N, "content": "..."}` objects. Reference metadata (blob URLs, reranker scores) is in `result.references[]`.
+- Reasoning effort is configurable via `AZURE_AI_KB_REASONING_EFFORT` env var (minimal, low, medium). Default is "low".
 - Authentication uses `DefaultAzureCredential` (Azure AD token), not API keys.
+- The original Azure OpenAI Responses API + file_search implementation is preserved in `search_openai_vector_store_reference()` for reference only.
 
 ### Two Entry Points — Keep in Sync
 
@@ -130,7 +134,7 @@ Knowledge documents follow the pattern: `{PREFIX}-{number}-{slug}.md` (e.g., `OP
 
 | venv | Location | Key Packages | Purpose |
 |------|----------|--------------|---------|
-| Agent | `agent/.venv` | `github-copilot-sdk`, `openai`, `azure-identity`, `mcp`, `fastapi`, `nanoid` | Agent core + UI backend |
+| Agent | `agent/.venv` | `github-copilot-sdk`, `azure-search-documents`, `azure-identity`, `mcp`, `fastapi`, `nanoid` | Agent core + UI backend |
 | Change Mgmt MCP | `mcp/change_mgmt/.venv` | `mcp[cli]`, `pydantic`, `structlog` | Approval matrix server |
 | Security MCP | `mcp/security/.venv` | `mcp[cli]`, `pydantic`, `structlog` | Vulnerability scan server |
 

@@ -18,8 +18,10 @@
 
 Before the demo:
 - [ ] GitHub repos created and pushed (`contoso-*-api`) — use `scripts/push-sample-repos.ps1`
-- [ ] `agent/.env` configured (Azure OpenAI, Copilot CLI path, MCP URLs)
-- [ ] Azure OpenAI vector store deployed — `python scripts/deploy-vector-store.py`
+- [ ] `agent/.env` configured (Azure AI Search KB, Copilot CLI path, MCP URLs)
+- [ ] Policy documents from `knowledge/` uploaded to an **Azure Blob Storage** container
+- [ ] Azure AI Search **Knowledge Source** created pointing to the blob container (auto-indexes and creates a local index in FoundryIQ)
+- [ ] Azure AI Search **Knowledge Base** created consuming the knowledge source — powered by LLM (e.g., gpt-4o), with extractive output mode, reasoning effort, and retrieval instructions configured
 - [ ] Virtual environments set up (`agent/.venv`, `mcp/change_mgmt/.venv`, `mcp/security/.venv`)
 - [ ] GitHub CLI authenticated — `gh auth login`
 - [ ] Azure CLI authenticated — `az login`
@@ -115,7 +117,7 @@ knowledge/
 └── REL-1.0-pr-gates.md              # Quality gates
 ```
 
-**Say:** "We have policy documents that define what 'compliant' means. The agent uses these as evidence when opening PRs. This is policy-as-code that humans AND machines can read."
+**Say:** "We have policy documents that define what 'compliant' means. The agent uses these as evidence when opening PRs — retrieved via Azure AI Search Knowledge Base (FoundryIQ) using extractive retrieval. This is policy-as-code that humans AND machines can read."
 
 ---
 
@@ -254,7 +256,7 @@ A: The agent runs tests locally before opening PRs. If tests fail, it still open
 A: The patcher has deterministic rules in `patcher_fastapi.py`. It detects missing patterns and applies known-good fixes.
 
 **Q: Can we customize the policies?**  
-A: Yes! Edit the markdown files in `knowledge/`. The RAG search will pick them up.
+A: Yes! Edit the markdown files in `knowledge/`. Upload them to your Azure AI Search knowledge source. The extractive retrieval will pick them up.
 
 **Q: What about non-Python services?**  
 A: You'd add patchers for other languages. The architecture is pluggable.

@@ -69,7 +69,7 @@ This demo implements **automated fleet-wide compliance enforcement** - an AI age
 | **Autonomous Tool Calling** | SDK decides which tools to invoke based on the task | 13 custom tools registered with the SDK |
 | **Function Calling** | Tools return structured JSON that the SDK reasons over | Each tool returns `ToolResult` with JSON payload |
 | **MCP Server Integration** | External services for approvals and security scans | Change Mgmt (port 4101), Security (port 4102) |
-| **RAG (Retrieval-Augmented Generation)** | Policy evidence grounded in organizational knowledge | Azure OpenAI Vector Store with Responses API |
+| **RAG (Retrieval-Augmented Generation)** | Policy evidence grounded in organizational knowledge | Azure AI Search Knowledge Base (FoundryIQ) with extractive retrieval |
 | **Multi-Step Reasoning** | SDK chains tools: clone → analyze → patch → test → PR | Event-driven workflow with state tracking |
 | **Real-Time Event Streaming** | Live UI updates as agent executes | WebSocket events via `asyncio.run_coroutine_threadsafe` |
 
@@ -207,21 +207,55 @@ ORIGINAL CODE                              MODIFIED CODE
 | **Node.js 18+** | Frontend and Copilot CLI | `node --version` |
 | **Git** | Repository operations | `git --version` |
 | **GitHub CLI** | PR creation, repo management | `gh --version` |
-| **Azure CLI** | Azure authentication for RAG | `az --version` |
+| **Azure CLI** | Azure authentication for RAG (DefaultAzureCredential) | `az --version` |
 | **GitHub Copilot License** | Required for Copilot SDK | Check GitHub account |
 | **GitHub Copilot CLI** | SDK dependency | `npm list -g @anthropic-ai/copilot` |
 
-### Azure OpenAI Requirements
+### Azure AI Search Knowledge Base (FoundryIQ) Requirements
 
-This project uses **Azure OpenAI's native Vector Store** (NOT Azure AI Search or Foundry indexes).
+This project uses **Azure AI Search Knowledge Base** (FoundryIQ) for RAG — NOT Azure OpenAI Vector Store.
 
 | Resource | Purpose |
-|----------|---------|
-| **Azure OpenAI Service** | Hosts the model and vector store |
-| **Model Deployment** (e.g., `gpt-4o`) | Required for Responses API with `file_search` |
-| **Vector Store** | Stores policy documents for RAG search |
+|----------|----------|
+| **Azure Storage Account** | Blob container holding the policy markdown files from `knowledge/` |
+| **Azure AI Search Service** | Hosts the knowledge base, knowledge sources, and local indexes |
+| **Knowledge Source** | Points to the Azure Blob Storage container; automatically indexes documents and creates a local index in FoundryIQ |
+| **Knowledge Base** | Consumes the knowledge source; powered by an LLM (e.g., `gpt-4o`) with configurable instructions, output mode, and reasoning effort |
+| **Azure OpenAI Model** (e.g., `gpt-4o`) | Used by the knowledge base internally for reranking and answer generation (configured in KB, not in agent code) |
 
-**RBAC:** User must have `Cognitive Services OpenAI User` role and permissions to create vector stores.
+#### FoundryIQ Setup Pipeline
+
+```
+┌──────────────────┐     upload      ┌──────────────────────┐
+│  knowledge/*.md  │ ──────────────► │  Azure Blob Storage  │
+│  (policy docs)   │                 │  (container)         │
+└──────────────────┘                 └──────────┬───────────┘
+                                                │
+                                                │ points to
+                                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│               Azure AI Search (FoundryIQ)                     │
+│  ┌─────────────────────────────────────────────────────┐      │
+│  │  Knowledge Source                                   │      │
+│  │  • Data source: Azure Blob Storage container        │      │
+│  │  • Auto-indexes documents on creation               │      │
+│  │  • Creates a local index in FoundryIQ               │      │
+│  └──────────────────────┬──────────────────────────────┘      │
+│                         │ consumed by                          │
+│                         ▼                                      │
+│  ┌─────────────────────────────────────────────────────┐      │
+│  │  Knowledge Base                                     │      │
+│  │  • Powered by LLM (gpt-4o)                          │      │
+│  │  • Output mode: Extractive data                     │      │
+│  │  • Reasoning effort: low                            │      │
+│  │  • Custom instructions for retrieval                │      │
+│  └─────────────────────────────────────────────────────┘      │
+└───────────────────────────────────────────────────────────────┘
+```
+
+**RBAC:** User must have access to the Azure AI Search knowledge base via `DefaultAzureCredential` (Managed Identity, Azure CLI, etc.).
+
+> **Note:** Azure OpenAI is used **only** by the knowledge base internally for reranking — the agent code does NOT call Azure OpenAI directly. All LLM reasoning comes from the GitHub Copilot SDK.
 
 ---
 
@@ -277,15 +311,22 @@ copy .env.example .env
 
 Edit `agent/.env`:
 ```env
-AZURE_OPENAI_ENDPOINT=https://YOUR_RESOURCE.openai.azure.com/openai/v1/
-AZURE_OPENAI_DEPLOYMENT=gpt-4o
-AZURE_OPENAI_VECTOR_STORE_ID=   # Set by deploy script
+# Azure AI Search Knowledge Base (FoundryIQ)
+AZURE_AI_SEARCH_ENDPOINT=https://YOUR_SEARCH_SERVICE.search.windows.net
+AZURE_AI_KB_NAME=your-knowledge-base-name
+AZURE_AI_KB_REASONING_EFFORT=low
+
+# Copilot SDK
 COPILOT_CLI_PATH=C:\Users\YOUR_USERNAME\AppData\Roaming\npm\copilot.cmd
+
+# MCP Servers
 CHANGE_MGMT_URL=http://localhost:4101
 SECURITY_URL=http://localhost:4102
 ```
 
 > **Finding Copilot CLI path:** Run `where.exe copilot` or check `%APPDATA%\npm\copilot.cmd`
+>
+> **Knowledge Base setup:** Create an Azure AI Search knowledge base with a knowledge source pointing to the policy documents in `knowledge/`. Configure the KB with extractive output mode in the Azure portal.
 
 #### 5. Create Virtual Environments
 
@@ -300,15 +341,21 @@ python -m venv .venv && .venv\Scripts\Activate.ps1 && pip install -r requirement
 cd ..
 ```
 
-#### 6. Deploy Vector Store
+#### 6. Configure Azure AI Search Knowledge Base
 
-```powershell
-cd agent
-.venv\Scripts\Activate.ps1
-python ..\scripts\deploy-vector-store.py
-deactivate
-cd ..
-```
+1. **Create an Azure Storage Account** — create a blob container and upload the policy markdown files from `knowledge/` into it
+2. **Create an Azure AI Search** resource in the Azure portal
+3. **Create a Knowledge Source** in FoundryIQ — point it to the Azure Blob Storage container. FoundryIQ automatically indexes the documents and creates a **local index**
+4. **Create a Knowledge Base** — select the knowledge source created above. Configure:
+   - **Model:** Select an Azure OpenAI deployment (e.g., `gpt-4o`)
+   - **Output mode:** Extractive data (returns verbatim text, not synthesized answers)
+   - **Reasoning effort:** Low (configurable via `AZURE_AI_KB_REASONING_EFFORT` env var)
+   - **Instructions:** Add retrieval instructions to help the KB map queries to the right policy documents
+5. **Set environment variables** in `agent/.env`:
+   - `AZURE_AI_SEARCH_ENDPOINT` — the Azure AI Search service endpoint URL
+   - `AZURE_AI_KB_NAME` — the knowledge base name
+
+> **Note:** The `scripts/deploy-vector-store.py` script is for the legacy Azure OpenAI Vector Store approach and is no longer needed.
 
 #### 7. Install Frontend
 
@@ -346,7 +393,7 @@ ghcp-cli-sdk-sample1/
 │   │   ├── github_ops.py       # Git/GitHub operations
 │   │   ├── mcp_clients.py      # MCP server clients
 │   │   ├── patcher_fastapi.py  # Code patching logic
-│   │   └── rag.py              # Knowledge base search (Azure OpenAI)
+│   │   └── rag.py              # Knowledge base search (Azure AI Search KB / FoundryIQ)
 │   ├── test_sdk_response.py    # SDK response parsing tests
 │   ├── requirements.txt
 │   └── .env.example
@@ -369,7 +416,7 @@ ghcp-cli-sdk-sample1/
 │   └── contoso-payments-api/
 │
 ├── scripts/
-│   ├── deploy-vector-store.py  # Deploy Azure OpenAI vector store
+│   ├── deploy-vector-store.py  # Legacy: Deploy Azure OpenAI vector store (not used)
 │   └── push-sample-repos.ps1   # Push samples to GitHub
 │
 ├── images/
@@ -517,7 +564,7 @@ Despite the low-risk profile, the following safeguards are in place:
 
 2. **Code correctness validation** — All generated patches are validated with `ast.parse()` for syntax correctness before being written. Tests are run (`pytest`) against the patched code before the PR is opened. If tests fail, the agent attempts SDK-based code fixing (up to 3 retries), and the test results are reported in the PR for reviewer awareness.
 
-3. **Grounded outputs (RAG)** — PR descriptions cite evidence from the organization's own policy documents retrieved from the Azure OpenAI vector store. This grounds the LLM's output in organizational policy rather than relying on the model's training data, reducing hallucination risk in policy citations.
+3. **Grounded outputs (RAG)** — PR descriptions cite evidence from the organization's own policy documents retrieved from the Azure AI Search Knowledge Base (FoundryIQ). The knowledge base uses extractive retrieval, returning verbatim text from policy documents rather than synthesized answers, further reducing hallucination risk in policy citations.
 
 4. **Bounded agent actions** — The Copilot SDK session is restricted to 13 explicitly registered custom tools via the `available_tools` whitelist. The SDK cannot use built-in file-write or terminal tools. All file writes are further constrained by path traversal guards and a workspace-only boundary check.
 
@@ -541,7 +588,7 @@ These considerations should be re-evaluated if the solution evolves to:
 |-------|----------|
 | `copilot: command not found` | Set `COPILOT_CLI_PATH` in `.env` to full path (`where.exe copilot`) |
 | `DefaultAzureCredential failed` | Run `az login` and verify subscription with `az account show` |
-| `Vector store not found` | Run `python scripts/deploy-vector-store.py` |
+| `Knowledge base not configured` | Set `AZURE_AI_SEARCH_ENDPOINT` and `AZURE_AI_KB_NAME` in `agent/.env` |
 | `Connection refused :4101/:4102` | Ensure MCP servers are running in separate terminals |
 | `gh: not logged in` | Run `gh auth login` |
 | `Error adding label` | Agent auto-creates labels; if issues persist, create manually with `gh label create` |
@@ -553,7 +600,7 @@ These considerations should be re-evaluated if the solution evolves to:
 - [GitHub Copilot CLI Documentation](https://docs.github.com/en/copilot/github-copilot-in-the-cli)
 - [GitHub Copilot SDK (Python)](https://github.com/github/copilot-sdk)
 - [MCP (Model Context Protocol) Specification](https://modelcontextprotocol.io/)
-- [Azure OpenAI Responses API](https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/responses)
+- [Azure AI Search Knowledge Base (FoundryIQ)](https://learn.microsoft.com/en-us/azure/search/knowledge-base-overview)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 
 ---

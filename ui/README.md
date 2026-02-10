@@ -117,7 +117,7 @@ The backend emits these events to the frontend:
 
 | Event | Description |
 |-------|-------------|
-| `system_status` | GitHub CLI, MCP, Vector Store status |
+| `system_status` | GitHub CLI, MCP, Knowledge Base status |
 | `agent_start` | Agent execution begins |
 | `agent_complete` | Agent finished with summary |
 | `tool_call_start` | Tool invocation started |
