@@ -230,7 +230,8 @@ class AgentEventEmitter:
         from fleet_agent.agent_loop import create_tools, SYSTEM_PROMPT, WORKSPACES, _workspace_registry, get_created_prs, clear_created_prs, clear_modified_files
         from fleet_agent.github_ops import gh_auth_status
         from copilot import CopilotClient
-        from copilot.types import Tool, ToolResult
+        from copilot.tools import Tool, ToolResult
+        from copilot.session import PermissionRequestResult
         import re
         
         # Clear any previous tracking (file-based logs)
@@ -277,11 +278,12 @@ Process all repositories completely."""
         await client.start()
         
         try:
-            session = await client.create_session({
-                "system_message": {"content": SYSTEM_PROMPT},
-                "tools": tools,
-                "available_tools": tool_names,
-            })
+            session = await client.create_session(
+                system_message={"mode": "replace", "content": SYSTEM_PROMPT},
+                tools=tools,
+                available_tools=tool_names,
+                on_permission_request=lambda req, inv: PermissionRequestResult(kind="approved"),
+            )
             
             await self.log("Copilot SDK session created (powered by GitHub Copilot)")
             
@@ -563,7 +565,7 @@ Process all repositories completely."""
             
             # Run session.send() as a task while heartbeat runs in parallel
             # Events are emitted directly via emit_now() from the on_event callback
-            send_task = asyncio.create_task(session.send({"prompt": user_input}))
+            send_task = asyncio.create_task(session.send(user_input))
             
             # Wait for completion (done_event is set when SDK sends "done" event)
             try:

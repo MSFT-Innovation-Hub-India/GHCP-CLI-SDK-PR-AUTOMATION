@@ -134,11 +134,13 @@ Copilot CLI (server mode)
 client = CopilotClient()
 await client.start()  # Spawns copilot CLI as background process
 
-session = await client.create_session({
-    "system_message": {"content": SYSTEM_PROMPT},
-    "tools": [clone_tool, detect_drift_tool, apply_patches_tool, ...],
-})
-await session.send({"prompt": "Enforce compliance on contoso-payments-api"})
+session = await client.create_session(
+    system_message={"mode": "replace", "content": SYSTEM_PROMPT},
+    tools=[clone_tool, detect_drift_tool, apply_patches_tool, ...],
+    available_tools=["clone_repository", "detect_compliance_drift", ...],
+    on_permission_request=lambda req, inv: PermissionRequestResult(kind="approved"),
+)
+await session.send("Enforce compliance on contoso-payments-api")
 # SDK autonomously calls tools, reasons over results, and completes the workflow
 ```
 
@@ -148,7 +150,7 @@ This pattern enables **enterprise automation scenarios** that would be impossibl
 
 > **🔑 Interactive vs. Embedded:** Developers typically use GitHub Copilot CLI or Agent Mode in VS Code **interactively** - asking questions, getting suggestions, and iterating in real-time. In this sample, we take a fundamentally different approach: **we embed the GitHub Copilot SDK directly into an autonomous agent**. The SDK becomes the reasoning engine for a fully automated workflow, not an interactive assistant.
 
-> **⚠️ Preview SDK Notice:** The GitHub Copilot SDK is currently in **preview**. This demo uses version `github-copilot-sdk>=0.1.21`.
+> **⚠️ Preview SDK Notice:** The GitHub Copilot SDK is currently in **preview**. This demo pins version `github-copilot-sdk==0.2.2` (protocol v3). See [Upgrading the Copilot SDK](#upgrading-the-copilot-sdk) for details.
 
 ---
 
@@ -525,6 +527,61 @@ The demo includes three intentionally non-compliant FastAPI services:
 | **contoso-catalog-api** | Product catalog | Missing health endpoints, no structlog, no middleware |
 
 The **payments** service triggers CM-7.2 (high-impact service), requiring SRE-Prod approval.
+
+---
+
+## ⬆️ Upgrading the Copilot SDK
+
+The `github-copilot-sdk` version is **pinned** in `agent/requirements.txt` to prevent silent breakage. The Copilot CLI (Node.js) and the Python SDK are versioned independently — if the CLI auto-updates to a newer protocol version, the pinned SDK may stop working with a **protocol version mismatch** error:
+
+```
+SDK expects version 3, but server reports version 4
+```
+
+### When to Upgrade
+
+- You see a **protocol version mismatch** error at runtime
+- The Copilot CLI was updated (via `npm update -g`) and now uses a newer protocol
+
+### How to Upgrade
+
+```powershell
+cd agent
+.venv\Scripts\Activate.ps1
+
+# Check current version
+pip show github-copilot-sdk
+
+# Upgrade to latest
+pip install --upgrade github-copilot-sdk
+
+# Check new version
+pip show github-copilot-sdk
+```
+
+After upgrading, **check for breaking API changes** — the SDK is in preview and the API surface may change between versions. Key areas to verify:
+
+| Area | Files to Check |
+|------|----------------|
+| `create_session()` signature | `agent_loop.py`, `patcher_fastapi.py`, `ui/backend/main.py` |
+| `system_message` format | Same files — may change between string, dict, or TypedDict |
+| `session.send()` signature | Same files — may change between dict and plain string |
+| `PermissionRequestResult` fields | Same files — `kind` values may change |
+| Import paths | `copilot.tools`, `copilot.session` — module names may be reorganized |
+| `ToolResult` / `text_result_for_llm` | `agent_loop.py` — field naming (camelCase vs snake_case) |
+
+Once verified, **pin the new version** in `agent/requirements.txt`:
+
+```
+github-copilot-sdk==X.Y.Z
+```
+
+### Version History
+
+| SDK Version | Protocol | Key Changes |
+|-------------|----------|-------------|
+| 0.1.22 | v2 | Original version. `create_session({dict})`, `session.send({"prompt": ...})`, `textResultForLlm`, imports from `copilot.types` |
+| 0.2.2 | v3 | Breaking: `create_session(**kwargs)`, `session.send(str)`, `text_result_for_llm`, imports from `copilot.tools`/`copilot.session`, `system_message` must be dict (`{"mode": "replace", "content": ...}`), `on_permission_request` takes 2 args, `kind="approved"` |
 
 ---
 

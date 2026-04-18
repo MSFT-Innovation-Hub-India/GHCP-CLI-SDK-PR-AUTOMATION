@@ -13,7 +13,7 @@ Key SDK Components:
 - Tool: Defines a callable tool (name, description, handler, parameters)
 - ToolHandler: Function signature (ToolInvocation) -> ToolResult
 - ToolInvocation: Contains tool_name, arguments
-- ToolResult: Contains textResultForLlm for the response
+- ToolResult: Contains text_result_for_llm for the response
 """
 
 from __future__ import annotations
@@ -29,7 +29,8 @@ from typing import Any, Optional
 from nanoid import generate
 
 from copilot import CopilotClient
-from copilot.types import Tool, ToolInvocation, ToolResult
+from copilot.tools import Tool, ToolInvocation, ToolResult
+from copilot.session import PermissionRequestResult
 
 # Import existing modules for actual functionality
 from fleet_agent.rag import search as rag_search_impl
@@ -217,7 +218,7 @@ def create_tools() -> list[Tool]:
             hits = rag_search_impl(query, k)
             results = [{"doc_id": h.doc_id, "score": h.score, "excerpt": h.excerpt[:200]} for h in hits]
             print(f"   [TOOL] rag_search found {len(results)} documents", flush=True)
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "count": len(results),
                 "documents": results
@@ -266,7 +267,7 @@ def create_tools() -> list[Tool]:
             _workspace_registry[url] = ws
             print(f"   [TOOL] Clone successful", flush=True)
             
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "repo_name": repo_name,
                 "workspace": str(ws),
@@ -304,7 +305,7 @@ def create_tools() -> list[Tool]:
         
         try:
             drift = detect_drift_impl(ws)
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "applicable": drift.applicable,
                 "missing_healthz": drift.missing_healthz,
@@ -349,7 +350,7 @@ def create_tools() -> list[Tool]:
             result = mcp_security_scan(req_text)
             findings = result.get("findings", [])
             
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "vulnerabilities_found": len(findings),
                 "findings": findings,
@@ -391,7 +392,7 @@ def create_tools() -> list[Tool]:
             # Log modified files for UI to read (SDK events don't expose tool results)
             log_modified_files(repo_url, touched)
             
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "modified_files": touched,
                 "count": len(touched),
@@ -427,7 +428,7 @@ def create_tools() -> list[Tool]:
             repo_name = _repo_name(repo_url)
             result = mcp_approval(repo_name, touched_paths)
             
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "required_approvals": result.get("required_approvals", []),
                 "risk_level": result.get("risk_level", "unknown"),
@@ -479,7 +480,7 @@ def create_tools() -> list[Tool]:
         
         try:
             checkout_branch(ws, branch_name)
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "branch": branch_name,
                 "message": f"Created and checked out branch: {branch_name}"
@@ -519,7 +520,7 @@ def create_tools() -> list[Tool]:
         
         try:
             if not (ws / "tests").exists():
-                return ToolResult(textResultForLlm=json.dumps({
+                return ToolResult(text_result_for_llm=json.dumps({
                     "success": True,
                     "passed": True,
                     "skipped": True,
@@ -538,7 +539,7 @@ def create_tools() -> list[Tool]:
                 cwd=str(ws), capture_output=True, text=True, timeout=120
             )
             
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "passed": result.returncode == 0,
                 "skipped": False,
@@ -577,7 +578,7 @@ def create_tools() -> list[Tool]:
         
         try:
             committed = commit_all(ws, message)
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "committed": committed,
                 "message": f"Committed changes: {message}" if committed else "Nothing to commit"
@@ -618,7 +619,7 @@ def create_tools() -> list[Tool]:
         
         try:
             push_branch(ws, branch_name)
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "pushed": True,
                 "branch": branch_name,
@@ -672,7 +673,7 @@ def create_tools() -> list[Tool]:
             created_prs.append({"repo_url": repo_url, "pr_url": pr_url, "title": title})
             log_created_pr(repo_url, pr_url, title)  # File-based for cross-module access
             print(f"[PR_CREATED] {pr_url}", flush=True)  # Marker for backend to capture
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "pr_url": pr_url,
                 "title": title,
@@ -733,13 +734,13 @@ def create_tools() -> list[Tool]:
         try:
             full_path = ws / file_path
             if not full_path.exists():
-                return ToolResult(textResultForLlm=json.dumps({
+                return ToolResult(text_result_for_llm=json.dumps({
                     "success": False,
                     "error": f"File not found: {file_path}"
                 }))
             
             content = full_path.read_text(encoding="utf-8")
-            return ToolResult(textResultForLlm=json.dumps({
+            return ToolResult(text_result_for_llm=json.dumps({
                 "success": True,
                 "file_path": file_path,
                 "content": content[:10000],  # Limit to 10k chars
@@ -797,7 +798,7 @@ def create_tools() -> list[Tool]:
                     if file_path.endswith(".py"):
                         ast.parse(fixed_content)
                 except SyntaxError as e:
-                    return ToolResult(textResultForLlm=json.dumps({
+                    return ToolResult(text_result_for_llm=json.dumps({
                         "success": False,
                         "error": f"SDK generated invalid syntax: {e.msg} at line {e.lineno}",
                         "file_path": file_path
@@ -805,14 +806,14 @@ def create_tools() -> list[Tool]:
                 
                 # Write the fixed content
                 full_path.write_text(fixed_content, encoding="utf-8")
-                return ToolResult(textResultForLlm=json.dumps({
+                return ToolResult(text_result_for_llm=json.dumps({
                     "success": True,
                     "file_path": file_path,
                     "message": f"Fixed {file_path} based on error",
                     "changes_made": True
                 }))
             else:
-                return ToolResult(textResultForLlm=json.dumps({
+                return ToolResult(text_result_for_llm=json.dumps({
                     "success": False,
                     "file_path": file_path,
                     "message": "SDK could not determine a fix",
@@ -880,11 +881,12 @@ def _fix_code_with_sdk(original_code: str, file_path: str, error_message: str) -
         try:
             model = os.getenv("COPILOT_MODEL", "gpt-4o")
             
-            session = await client.create_session({
-                "model": model,
-                "system_message": {"content": "You are a code fixer. Output ONLY the complete fixed code, no explanations."},
-                "available_tools": [],  # Prevent SDK built-in tools from writing files to CWD
-            })
+            session = await client.create_session(
+                model=model,
+                system_message={"mode": "replace", "content": "You are a code fixer. Output ONLY the complete fixed code, no explanations."},
+                available_tools=[],  # Prevent SDK built-in tools from writing files to CWD
+                on_permission_request=lambda req, inv: PermissionRequestResult(kind="approved"),
+            )
             
             prompt = f"""Fix this Python code based on the error.
 
@@ -926,7 +928,7 @@ Output the fixed code:
                     done_event.set()
             
             session.on(on_event)
-            await session.send({"prompt": prompt})
+            await session.send(prompt)
             
             try:
                 await asyncio.wait_for(done_event.wait(), timeout=60.0)
@@ -1010,12 +1012,13 @@ async def run_agent(user_input: str) -> AgentRunResult:
         tool_names = [t.name for t in tools]
         
         # Create session with ONLY custom tools (whitelist approach)
-        session = await client.create_session({
-            "model": model,
-            "system_message": {"content": SYSTEM_PROMPT},
-            "tools": tools,
-            "available_tools": tool_names,  # ONLY allow our custom tools
-        })
+        session = await client.create_session(
+            model=model,
+            system_message={"mode": "replace", "content": SYSTEM_PROMPT},
+            tools=tools,
+            available_tools=tool_names,  # ONLY allow our custom tools
+            on_permission_request=lambda req, inv: PermissionRequestResult(kind="approved"),
+        )
         
         print(f"\n{'='*60}")
         print("  Fleet Compliance Agent (Agentic Mode)")
@@ -1081,7 +1084,7 @@ async def run_agent(user_input: str) -> AgentRunResult:
         session.on(on_event)
         
         # Send user message and wait
-        await session.send({"prompt": user_input})
+        await session.send(user_input)
         
         try:
             await asyncio.wait_for(done_event.wait(), timeout=600.0)  # 10 minute timeout

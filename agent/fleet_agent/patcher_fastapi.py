@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Optional
 
 from copilot import CopilotClient
+from copilot.session import PermissionRequestResult
 from fleet_agent.rag import search as rag_search
 
 
@@ -693,11 +694,12 @@ async def apply_async(repo: Path, service_name: str, drift: Optional[Drift] = No
     try:
         model = os.getenv("COPILOT_MODEL", "gpt-4o")
         
-        session = await client.create_session({
-            "model": model,
-            "system_message": {"content": "You are a code transformation assistant. Output only code, no explanations."},
-            "available_tools": [],  # Prevent SDK built-in tools from writing files to CWD
-        })
+        session = await client.create_session(
+            model=model,
+            system_message={"mode": "replace", "content": "You are a code transformation assistant. Output only code, no explanations."},
+            available_tools=[],  # Prevent SDK built-in tools from writing files to CWD
+            on_permission_request=lambda req, inv: PermissionRequestResult(kind="approved"),
+        )
         
         # Collect response
         response_text = ""
@@ -717,7 +719,7 @@ async def apply_async(repo: Path, service_name: str, drift: Optional[Drift] = No
                 done_event.set()
         
         session.on(on_event)
-        await session.send({"prompt": prompt})
+        await session.send(prompt)
         
         try:
             await asyncio.wait_for(done_event.wait(), timeout=60.0)
