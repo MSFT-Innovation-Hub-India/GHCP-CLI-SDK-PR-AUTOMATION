@@ -527,10 +527,10 @@ def create_tools() -> list[Tool]:
                     "message": "No tests directory found - skipping"
                 }))
             
-            # Install dependencies
+            # Install dependencies (with timeout to prevent hanging)
             subprocess.run(
-                ["python", "-m", "pip", "install", "-r", "requirements.txt"],
-                cwd=str(ws), check=False, capture_output=True
+                ["python", "-m", "pip", "install", "-r", "requirements.txt", "--quiet"],
+                cwd=str(ws), check=False, capture_output=True, timeout=120
             )
             
             # Run tests
