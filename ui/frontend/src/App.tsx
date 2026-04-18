@@ -27,7 +27,7 @@ interface SystemStatus {
   github_user: string | null
   mcp_security: boolean
   mcp_change_mgmt: boolean
-  vector_store: boolean
+  knowledge_base: boolean
 }
 
 interface Repo {
@@ -574,7 +574,7 @@ export default function App() {
     status?.github_cli &&
     status?.mcp_security &&
     status?.mcp_change_mgmt &&
-    status?.vector_store
+    status?.knowledge_base
 
   return (
     <div className="h-screen bg-github-900 text-gray-200 flex flex-col overflow-hidden">
@@ -629,8 +629,8 @@ export default function App() {
                 label="MCP Change Mgmt"
               />
               <StatusIndicator
-                ok={status?.vector_store ?? false}
-                label="Vector Store"
+                ok={status?.knowledge_base ?? false}
+                label="Knowledge Base"
               />
             </div>
             <button

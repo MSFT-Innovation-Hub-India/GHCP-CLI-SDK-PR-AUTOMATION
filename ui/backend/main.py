@@ -96,7 +96,7 @@ def check_system_status() -> dict:
         "github_user": None,
         "mcp_security": False,
         "mcp_change_mgmt": False,
-        "vector_store": False,
+        "knowledge_base": False,
     }
     
     # Check GitHub CLI and get username
@@ -130,29 +130,25 @@ def check_system_status() -> dict:
         except:
             pass
     
-    # Check Vector Store - verify connectivity
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    vector_store_id = os.getenv("AZURE_OPENAI_VECTOR_STORE_ID")
-    if endpoint and vector_store_id:
+    # Check FoundryIQ Knowledge Base (Azure AI Search) connectivity
+    search_endpoint = os.getenv("AZURE_AI_SEARCH_ENDPOINT")
+    kb_name = os.getenv("AZURE_AI_KB_NAME")
+    if search_endpoint and kb_name:
         try:
-            from openai import AzureOpenAI
-            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-            
-            token_provider = get_bearer_token_provider(
-                DefaultAzureCredential(),
-                "https://cognitiveservices.azure.com/.default"
+            from azure.identity import DefaultAzureCredential
+            from azure.search.documents.knowledgebases import KnowledgeBaseRetrievalClient
+
+            credential = DefaultAzureCredential()
+            # Construct the client — success means endpoint + credentials are valid
+            _client = KnowledgeBaseRetrievalClient(
+                endpoint=search_endpoint,
+                knowledge_base_name=kb_name,
+                credential=credential,
             )
-            client = AzureOpenAI(
-                azure_endpoint=endpoint.replace("/openai/v1/", "").replace("/openai/v1", ""),
-                azure_ad_token_provider=token_provider,
-                api_version="2025-01-01-preview"
-            )
-            # Quick check - retrieve vector store info
-            vs = client.vector_stores.retrieve(vector_store_id)
-            status["vector_store"] = vs.status == "completed"
+            status["knowledge_base"] = True
         except Exception as e:
-            print(f"[STATUS] Vector store check failed: {e}")
-            status["vector_store"] = False
+            print(f"[STATUS] Knowledge base check failed: {e}")
+            status["knowledge_base"] = False
     
     return status
 
